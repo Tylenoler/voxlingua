@@ -2,67 +2,82 @@
 
 ## 1. 系统架构概览
 
-### 双端通信架构
+### 混合架构（本地语音 + 云端/本地 LLM）
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  💻 Desktop App (Tauri v2)                                       │
-│                                                                  │
-│  ┌──────────────────────────────────────┐                       │
-│  │  Tauri Main Process (Rust)            │                       │
-│  │  ├── 窗口管理                          │                       │
-│  │  ├── 系统托盘                            │                       │
-│  │  ├── Sidecar 生命周期管理               │                       │
-│  │  └── 本地文件系统 API                   │                       │
-│  └──────────────┬───────────────────────┘                       │
-│                 │  IPC (invoke)                                  │
-│  ┌──────────────▼───────────────────────┐                       │
-│  │  Frontend (React + TypeScript)        │                       │
-│  │  ├── 对话界面 (Chat UI)                │                       │
-│  │  ├── 声纹管理 (Voice Profile Manager)  │                       │
-│  │  ├── 设置面板 (Settings)               │                       │
-│  │  └── 本地仪表盘 (Dashboard)            │                       │
-│  └──────────────────────────────────────┘                       │
-│                                                                  │
-│  ┌──────────────────────────────────────┐                       │
-│  │  Python Sidecar (FastAPI)             │◄──── localhost:8765   │
-│  │  ────────────────                     │                       │
-│  │  [AI Engine Server]                   │                       │
-│  │                                                                  │
-│  │  ├── /api/stt        ← 语音转文字    │                       │
-│  │  ├── /api/chat       ← 对话生成      │                       │
-│  │  ├── /api/tts        ← 语音合成      │                       │
-│  │  ├── /api/score      ← 发音评分      │                       │
-│  │  ├── /api/voice-clone ← 声纹克隆     │                       │
-│  │  └── /ws/mobile      ← 手机端 WebSocket │                    │
-│  └──────────────────────────────────────┘                       │
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ 局域网 WiFi
-                           │ WebSocket / HTTP
-┌──────────────────────────▼───────────────────────────────────────┐
-│  📱 Mobile App (Flutter)                                         │
-│                                                                  │
-│  ┌──────────────────────────────────────┐                       │
-│  │  Auto Discovery Layer (mDNS)         │                       │
-│  │  自动搜索同一局域网内的 VoxLingua 桌面     │                       │
-│  └──────────────────────────────────────┘                       │
-│                                                                  │
-│  ┌──────────────────────────────────────┐                       │
-│  │  Communication Layer (WebSocket)     │                       │
-│  │  ├── 发送录音音频 (Opus 编码)          │                       │
-│  │  ├── 接收合成音频 (PCM/WAV)           │                       │
-│  │  └── 收发 JSON 控制消息               │                       │
-│  └──────────────────────────────────────┘                       │
-│                                                                  │
-│  ┌──────────────────────────────────────┐                       │
-│  │  UI Layer                             │                       │
-│  │  ├── 对话页面 (Chat Screen)           │                       │
-│  │  ├── 录音界面 (Record Button)         │                       │
-│  │  ├── 单词练习 (Vocab Practice)        │                       │
-│  │  ├── 评分卡片 (Score Card)            │                       │
-│  │  └── 设置页面 (Settings)              │                       │
-│  └──────────────────────────────────────┘                       │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  💻 Desktop App (Tauri v2)                                          │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Tauri Main Process (Rust)                                    │   │
+│  │  ├── 窗口管理（可最小化到托盘，后台持续运行）                   │   │
+│  │  ├── Sidecar 生命周期管理（启动/停止/重启 Python 引擎）        │   │
+│  │  └── 本地文件系统 API（声纹模板、对话历史存储）                 │   │
+│  └──────────────────┬──────────────────────────────────────────┘   │
+│                     │ IPC                                          │
+│  ┌──────────────────▼──────────────────────────────────────────┐   │
+│  │  Frontend (React + TypeScript)                               │   │
+│  │  ├── 状态面板：电脑运行状态、模型加载进度、连接状态            │   │
+│  │  ├── 声纹管理：上传/切换/预设纽约口音模板                     │   │
+│  │  ├── LLM 配置：切换云端/本地、配置 API Key                    │   │
+│  │  └── 纠正参数：纠正灵敏度、关闭/开启纠正                      │   │
+│  └────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Python Sidecar — AI Engine Server (FastAPI)                 │   │
+│  │  ───────────────────────────────────────                     │   │
+│  │  [Uvicorn on localhost:9876]                                 │   │
+│  │                                                                   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │   │
+│  │  │  STT     │  │  TTS     │  │  评分引擎  │  │ LLM 路由     │  │   │
+│  │  │ Whisper  │  │CosyVoice │  │  音素对齐  │  │ ├── 云端API  │  │   │
+│  │  │ 本地     │  │ 本地     │  │  特征对比  │  │ │(GPT/Claude)│  │   │
+│  │  └──────────┘  └──────────┘  └────────────┘  │ └── 本地     │  │   │
+│  │                                               │   (Qwen GGUF)│  │   │
+│  │  ┌────────────────────────────────────┐       └──────────────┘  │   │
+│  │  │ Voice Profile Store               │                          │   │
+│  │  │ ├── 纽约口音 (默认, 你提供音频)     │                          │   │
+│  │  │ └── 用户自定义 (可选)              │                          │   │
+│  │  └────────────────────────────────────┘                          │   │
+│  │                                                                     │
+│  │  ┌─────────────────────────────────────────────────────────┐   │   │
+│  │  │           LAN WebSocket Server (端口 9876)             │   │   │
+│  │  │   /ws/mobile — 手机端主通道                            │   │   │
+│  │  │   /ws/correction — 实时纠正流                         │   │   │
+│  │  └─────────────────────────────────────────────────────────┘   │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└───────────────────────────┬─────────────────────────────────────────┘
+                            │ 局域网 WiFi
+                            │ WebSocket
+┌───────────────────────────▼─────────────────────────────────────────┐
+│  📱 Mobile App (Flutter) — 简约 UI                                  │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  ┌──────────────────────────────────────────────────────────┐   │   │
+│  │  Auto Discovery (mDNS)  →  "VoxLingua Desktop found!"    │   │   │
+│  └──────────────────────────────────────────────────────────┘   │   │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  [主界面 — 极简对话]                                          │  │
+│  │                                                              │  │
+│  │  ┌────────────────────────────────────┐                      │  │
+│  │  │  AI: Hey! How's your day going?   │ ← 文字 + 自动播放    │  │
+│  │  │                                    │                      │  │
+│  │  │  You: It's going pretty good!     │ ← 你的话             │  │
+│  │  │       ───                           │                      │  │
+│  │  │       ↑ "going" 的 ng 音要发到位     │ ← 实时纠正提示      │  │
+│  │  │                                    │                      │  │
+│  │  │  ┌──────────────────────────┐      │                      │  │
+│  │  │  │ 发音评分  86/100          │      │ ← 上滑展开详细评分  │  │
+│  │  │  │ 音素: ████████░░ 82%     │      │                      │  │
+│  │  │  │ 语调: ████████░░ 80%     │      │                      │  │
+│  │  │  │ 流利: █████████░ 90%     │      │                      │  │
+│  │  │  └──────────────────────────┘      │                      │  │
+│  │  └────────────────────────────────────┘                      │  │
+│  │                                                              │  │
+│  │  [                🎤 按住说话               ]                 │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 2. 目录结构
@@ -70,23 +85,17 @@
 ```
 voxlingua/
 ├── desktop/                         # Tauri 桌面应用
-│   ├── src-tauri/                   # Rust 后端 (Tauri)
+│   ├── src-tauri/
 │   │   ├── src/
-│   │   │   ├── main.rs              # 入口：启动 sidecar + 窗口
+│   │   │   ├── main.rs              # 入口
 │   │   │   ├── sidecar.rs           # Python 进程管理
 │   │   │   ├── commands.rs          # Tauri IPC 命令
-│   │   │   └── discovery.rs         # mDNS 广播 (桌面端发现)
+│   │   │   └── discovery.rs         # mDNS 广播
 │   │   ├── Cargo.toml
 │   │   └── tauri.conf.json
-│   ├── src/                         # React 前端
+│   ├── src/
 │   │   ├── components/
-│   │   │   ├── ChatPanel.tsx
-│   │   │   ├── VoiceProfileSelector.tsx
-│   │   │   ├── ScoreCard.tsx
-│   │   │   └── SettingsPanel.tsx
 │   │   ├── hooks/
-│   │   │   ├── useAIEngine.ts       # 与 Python sidecar 通信
-│   │   │   └── useAudioRecorder.ts
 │   │   ├── pages/
 │   │   ├── services/
 │   │   └── App.tsx
@@ -96,145 +105,213 @@ voxlingua/
 ├── mobile/                          # Flutter 手机应用
 │   ├── lib/
 │   │   ├── main.dart
+│   │   ├── app.dart                 # App 配置 + 主题（简约 Material You）
+│   │   ├── theme/
+│   │   │   └── app_theme.dart       # 极简主题定义
 │   │   ├── screens/
-│   │   │   ├── chat_screen.dart
-│   │   │   ├── practice_screen.dart
-│   │   │   └── settings_screen.dart
+│   │   │   ├── chat_screen.dart     # 主对话界面
+│   │   │   ├── correction_screen.dart # 纠正详情页
+│   │   │   └── settings_screen.dart # 设置
+│   │   ├── widgets/
+│   │   │   ├── chat_bubble.dart     # 对话气泡
+│   │   │   ├── correction_banner.dart # 纠正提示条
+│   │   │   ├── score_card.dart      # 评分卡片
+│   │   │   └── record_button.dart   # 录音按钮
 │   │   ├── services/
 │   │   │   ├── websocket_service.dart
-│   │   │   ├── discovery_service.dart  # mDNS 发现桌面
+│   │   │   ├── discovery_service.dart
 │   │   │   └── audio_service.dart
-│   │   ├── models/
-│   │   └── widgets/
+│   │   └── models/
+│   │       ├── chat_message.dart
+│   │       ├── correction.dart
+│   │       └── score.dart
 │   └── pubspec.yaml
 │
 ├── engine/                          # Python AI 引擎
-│   ├── api/                         # FastAPI 路由
+│   ├── api/
 │   │   ├── __init__.py
-│   │   ├── stt.py
-│   │   ├── llm.py
-│   │   ├── tts.py
-│   │   ├── scorer.py
-│   │   └── voice_clone.py
-│   ├── core/                        # 核心逻辑
+│   │   ├── stt.py                   # POST /api/stt
+│   │   ├── chat.py                  # POST /api/chat (LLM 路由)
+│   │   ├── tts.py                   # POST /api/tts
+│   │   ├── scorer.py                # POST /api/score
+│   │   └── correction.py            # POST /api/correct (音素纠正)
+│   ├── core/
 │   │   ├── pipeline.py              # 对话流水线编排
-│   │   ├── session_manager.py       # 会话管理
-│   │   └── audio_processor.py       # 音频处理工具
-│   ├── models/                      # 数据模型
+│   │   ├── correction_engine.py     # ⭐ 发音纠正引擎 (核心)
+│   │   │   ├── phoneme_aligner.py   #   音素对齐
+│   │   │   ├── accent_comparator.py #   口音对比
+│   │   │   └── feedback_generator.py # 纠正反馈生成
+│   │   ├── session_manager.py
+│   │   └── audio_processor.py
+│   ├── models/
 │   │   ├── schemas.py
 │   │   └── database.py
+│   ├── llm/                         # LLM 路由
+│   │   ├── base.py
+│   │   ├── cloud.py                 # 云端 API (GPT-4o/Claude)
+│   │   └── local.py                 # 本地 Qwen GGUF
+│   ├── voice_profiles/              # 声纹模板目录
+│   │   └── new_york/                # 纽约口音模板
+│   │       ├── reference.wav        # 你提供的参考音频
+│   │       └── profile.json         # 声纹特征文件
 │   ├── server.py                    # FastAPI 主入口
 │   ├── requirements.txt
-│   └── config.yaml                  # 模型路径/参数配置
+│   └── config.yaml
 │
-├── docs/                            # 文档
+├── docs/
 │   ├── PRD.md
 │   ├── ARCHITECTURE.md
-│   └── PROTOCOL.md                  # 手机-电脑通信协议
+│   └── PROTOCOL.md
 │
 ├── scripts/
-│   ├── download_models.sh           # 模型下载
-│   └── setup_dev.sh                 # 开发环境初始化
+│   ├── download_models.sh
+│   └── setup_dev.sh
 │
 ├── tests/
-│   ├── engine/                      # AI 引擎测试
-│   └── mobile/                      # Flutter 端到端测试
+│   ├── engine/
+│   ├── desktop/
+│   └── mobile/
 │
-├── .github/
-│   └── workflows/
-│       └── ci.yml                   # CI 流水线
-│
+├── .github/workflows/ci.yml
 ├── .gitignore
 └── README.md
 ```
 
-## 3. 通信协议设计
+## 3. 发音纠正引擎设计（核心模块）
 
-### 手机 ↔ 电脑 通信协议 (Protocol)
+这是本项目最具技术深度的部分。
 
-**传输层**: WebSocket (ws://{desktop_ip}:9876/ws/mobile)
+### 架构图
 
-**连接建立流程:**
 ```
-1. [手机] mDNS 搜索 "_voxlingua._tcp" 服务
-2. [电脑] 响应 mDNS，返回 IP + 端口 (9876)
-3. [手机] 发起 WebSocket 连接
-4. [电脑] 验证连接，返回 session_id
-5. [手机] 进入就绪状态
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Input Audio  │───►│  Whisper STT  │───►│  识别文本     │
+│  (用户录音)    │    │  + 时间戳     │    │  "I think..." │
+└──────────────┘    └──────┬───────┘    └──────▲────────┘
+                           │                   │
+                           ▼                   │
+┌──────────────────────────────────────────────┘
+│  Forced Alignment (Wav2Vec2 + CTC)
+│  → 音素级时间戳映射
+│  → "TH IH NG K" → [θ] [ɪ] [ŋ] [k]
+└─────────────────────┬───────────────────────
+                      │
+                      ▼
+┌──────────────────────────────────────────────┐
+│  Acoustic Feature Comparison                  │
+│  ──────────────────────────                   │
+│  用户音素特征 vs 纽约口音参考特征               │
+│                                              │
+│  MFCC + F0 + Formant 对比                     │
+│  → 每个音素的偏离度分数                        │
+└─────────────────────┬────────────────────────┘
+                      │
+                      ▼
+┌──────────────────────────────────────────────┐
+│  Error Classification (三级)                  │
+│  ────────────────────────                    │
+│                                              │
+│  ██ 轻微 (score ≥ 80)                        │
+│  → AI 对话中自然带出正确发音                   │
+│  → "I think it's nice" → "Yes, I think       │
+│     (emphasized) it's really nice!"          │
+│                                              │
+│  ██ 中等 (60 ≤ score < 80)                   │
+│  → 手机端实时显示文字纠正条                     │
+│  → "注意: think 的 th 要咬舌"                │
+│                                              │
+│  ██ 严重 (score < 60)                        │
+│  → 打断对话 (用户可选开关)                     │
+│  → 播放正确发音示范                            │
+│  → 用户跟读直到通过                            │
+└─────────────────────┬────────────────────────┘
+                      │
+                      ▼
+┌──────────────────────────────────────────────┐
+│  Feedback Generation                          │
+│  → 文本纠正提示 (手机端渲染)                   │
+│  → 正确发音音频 (TTS 局部合成)                │
+│  → 评分数据 (多维分数)                        │
+└──────────────────────────────────────────────┘
 ```
 
-**消息格式 (JSON):**
+### 音素对比算法
+
+```
+目标音素: [θ] (voiceless dental fricative)
+用户发音: [s] (voiceless alveolar fricative)
+
+声学差异:
+  - F2 (第2共振峰): 目标 ~1900Hz, 用户 ~1500Hz
+  - 频谱斜率差异: ~12dB
+  - 持续时间差异: ~30ms
+
+→ 音素偏离度: 72/100 → "中等错误"
+→ 纠正建议: "th 音舌尖要放在上下齿之间，不要发成 s"
+```
+
+## 4. 通信协议更新
+
+### 新增纠正消息
+
+**电脑 → 手机：实时纠正**
 ```json
-// 手机 → 电脑: 发送录音
 {
-  "type": "audio_input",
-  "session_id": "abc123",
-  "format": "opus",        // Opus 编码压缩
-  "data": "<base64_audio>"
-}
-
-// 电脑 → 手机: 回复合成音频
-{
-  "type": "audio_output",
-  "session_id": "abc123",
-  "format": "pcm_f32le",
-  "sample_rate": 24000,
-  "data": "<base64_audio>",
-  "text": "Nice to meet you too! How can I help you today?",
-  "metadata": {
-    "language": "en",
-    "emotion": "friendly"
-  }
-}
-
-// 电脑 → 手机: 发音评分结果
-{
-  "type": "scoring_result",
-  "overall_score": 85.5,
-  "dimensions": {
-    "phoneme_accuracy": 88.0,
-    "fluency": 82.0,
-    "prosody": 85.0,
-    "completeness": 90.0,
-    "grammar": 87.0
-  },
-  "details": {
+  "type": "correction",
+  "payload": {
+    "level": "medium",           // "mild" | "medium" | "severe"
+    "user_text": "I sink it's good",
+    "corrected_text": "I think it's good",
     "errors": [
-      {"phoneme": "θ", "expected": "θ", "actual": "s", "position": 1},
-      {"phoneme": "r", "expected": "ɹ", "actual": "r", "position": 4}
-    ]
+      {
+        "word": "think",
+        "phoneme": "θ",
+        "user_phoneme": "s",
+        "position": 0,
+        "severity": "medium",
+        "feedback": "注意 'think' 的 th 音，舌尖要放在上下齿之间"
+      }
+    ],
+    "audio_correction": "<base64_correct_pronunciation>",
+    "overall_score": 72
   }
 }
 ```
 
-## 4. 模型管理
+### 新增控制消息
 
-### 显存优化策略
-
-由于目标 GPU 显存为 6-8GB，采用以下优化：
-
-1. **按需加载 (Lazy Loading)**: 只有当前使用的模块才加载到显存
-2. **模型卸载 (Model Offloading)**: 切换功能时卸载前一模块
-3. **量化推理**: LLM 使用 GGUF Q4_K_M，Whisper 使用 ONNX 量化，CosyVoice 使用 FP16
-4. **模型调度器**: 统一管理模型生命周期，避免 OOM
-
-### 模型下载管理
-
-```
-engine/
-└── models/                         # 自动下载到这里
-    ├── whisper/                    # 语音识别模型
-    │   └── small.pt
-    ├── cosyvoice/                  # 语音合成+声纹克隆
-    │   └── CosyVoice-300M/
-    ├── llm/                        # 大语言模型
-    │   └── qwen2.5-7b-Q4_K_M.gguf
-    └── voice_profiles/             # 用户保存的声纹模板
-        └── user_profiles/
+**手机 → 电脑：开关纠正模式**
+```json
+{
+  "type": "set_correction_mode",
+  "payload": {
+    "mode": "medium",           // "off" | "mild_only" | "medium" | "all"
+    "interrupt_on_severe": true // 严重错误是否打断对话
+  }
+}
 ```
 
-## 5. 安全和隐私
+## 5. LLM 路由策略
 
-- **纯本地运行**：所有音频数据仅在局域网传输，不经过互联网
-- **音频不持久化**：默认不保存用户录音（可配置）
-- **声纹模板本地存储**：上传的参考音频仅保存在用户电脑上
+| 条件 | 使用 | 延迟 | 质量 |
+|------|------|------|------|
+| 有网络 + 已配置 API Key | 云端 API (GPT-4o/Claude) | ~1-2s | ⭐⭐⭐⭐⭐ |
+| 无网络 / 未配置 Key | 本地 LLM (Qwen2.5-7B) | ~3-5s | ⭐⭐⭐ |
+| **自动切换** | 云端超时/失败 → 自动降级本地 | — | 高可用 |
+
+> **为什么云端 LLM？**
+> 日常聊天的自然度是用户体验的关键。GPT-4o 级别的对话能力远超本地 7B 模型，能让用户感觉像在跟真人聊天，而不是跟机器人对台词。
+
+## 6. 纽约口音声纹模板
+
+你提供一段参考音频后，系统会：
+1. 提取声纹特征（CosyVoice speaker embedding）
+2. 保存为 `engine/voice_profiles/new_york/`
+3. 所有 TTS 输出自动使用该声纹
+4. 发音评分时以该口音为标准模板进行对比
+
+**参考音频要求：**
+- 时长：3-10 秒
+- 内容：自然的英语口语（最好包含多种音素）
+- 格式：WAV / MP3
+- 无背景噪音

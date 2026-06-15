@@ -141,7 +141,55 @@ ws://{desktop_ip}:9876/ws/mobile
 }
 ```
 
-### 3.4 控制消息
+### 3.4 实时纠正消息
+
+**电脑 → 手机：实时发音纠正**
+```json
+{
+  "type": "correction",
+  "payload": {
+    "level": "medium",
+    "user_text": "I sink it's good",
+    "corrected_text": "I think it's good",
+    "errors": [
+      {
+        "word": "think",
+        "word_position": 1,
+        "phoneme": "θ",
+        "user_phoneme": "s",
+        "severity": "medium",
+        "feedback": "注意 'think' 的 th 音，舌尖放在上下齿之间"
+      }
+    ],
+    "audio_correction": "<base64_audio_correct_pronunciation>",
+    "overall_score": 72,
+    "dimensions": {
+      "phoneme_accuracy": 68.0,
+      "fluency": 80.0,
+      "prosody": 75.0,
+      "completeness": 88.0
+    }
+  }
+}
+```
+
+**电脑 → 手机：打断式纠正（严重错误时）**
+```json
+{
+  "type": "interrupt_correction",
+  "payload": {
+    "interrupt_reason": "severe_phoneme_error",
+    "target_word": "think",
+    "target_phoneme": "θ",
+    "user_phoneme": "d",
+    "audio_demonstration": "<base64_audio>",
+    "instruction": "Let's practice this sound. Put your tongue between your teeth and blow gently.",
+    "retry_required": true
+  }
+}
+```
+
+### 3.5 控制消息
 
 **手机 → 电脑：切换场景**
 ```json
@@ -178,6 +226,24 @@ ws://{desktop_ip}:9876/ws/mobile
   }
 }
 ```
+
+**手机 → 电脑：设置纠正模式**
+```json
+{
+  "type": "set_correction_mode",
+  "payload": {
+    "mode": "medium",
+    "interrupt_on_severe": true
+  }
+}
+```
+
+| mode 值 | 行为 |
+|---------|------|
+| `"off"` | 关闭纠正，纯对话 |
+| `"mild_only"` | 仅显示轻微纠正，不打断 |
+| `"medium"` | 显示中等+轻微纠正（默认） |
+| `"all"` | 所有级别纠正，严重时打断对话强制跟读 |
 
 **电脑 → 手机：错误/状态**
 ```json

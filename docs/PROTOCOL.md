@@ -92,7 +92,58 @@ ws://{desktop_ip}:9876/ws/mobile
 }
 ```
 
-**电脑 → 手机：AI 回复音频**
+**电脑 → 手机：AI 回复音频（流式）**
+
+TTS 流式合成时，文本被切分成多个 chunk，逐个推送到手机：
+```json
+// Chunk 1/4 (首音, < 500ms)
+{
+  "type": "audio_stream_start",
+  "payload": {
+    "session_id": "sess_abc123xyz",
+    "total_chunks": 4,
+    "format": "pcm_f32le",
+    "sample_rate": 24000,
+    "text": "Hey! That's a really great question. ",
+    "chunk_index": 0,
+    "data": "<base64_audio_chunk_1>"
+  }
+}
+
+// Chunk 2/4
+{
+  "type": "audio_stream_chunk",
+  "payload": {
+    "session_id": "sess_abc123xyz",
+    "chunk_index": 1,
+    "data": "<base64_audio_chunk_2>"
+  }
+}
+
+// Chunk 3/4
+{
+  "type": "audio_stream_chunk",
+  "payload": {
+    "session_id": "sess_abc123xyz",
+    "chunk_index": 2,
+    "data": "<base64_audio_chunk_3>"
+  }
+}
+
+// Chunk 4/4 (结束)
+{
+  "type": "audio_stream_end",
+  "payload": {
+    "session_id": "sess_abc123xyz",
+    "chunk_index": 3,
+    "text": "Hey! That's a really great question. I've been thinking about that too!",
+    "full_text": true,
+    "data": "<base64_audio_chunk_4>"
+  }
+}
+```
+
+**非流式兼容（回退）**：
 ```json
 {
   "type": "audio_output",
@@ -100,8 +151,8 @@ ws://{desktop_ip}:9876/ws/mobile
     "session_id": "sess_abc123xyz",
     "format": "wav",
     "sample_rate": 24000,
-    "data": "<base64_encoded_audio>",
-    "text": "The original AI response text for display",
+    "data": "<base64_full_audio>",
+    "text": "The complete response text",
     "language": "en",
     "emotion": "friendly"
   }
@@ -274,4 +325,5 @@ ws://{desktop_ip}:9876/ws/mobile
 | 方向 | 编码 | 采样率 | 说明 |
 |------|------|--------|------|
 | 手机 → 电脑 | Opus | 16kHz | 压缩率高，适合实时传输用户录音 |
-| 电脑 → 手机 | PCM WAV | 24kHz | 高质量播放，CosyVoice 原生输出 |
+| 电脑 → 手机 (流式) | PCM f32le | 24kHz | 流式 chunk，手机端边收边播 |
+| 电脑 → 手机 (非流式) | WAV | 24kHz | 完整音频，兼容回退 |

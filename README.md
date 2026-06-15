@@ -12,9 +12,9 @@
 |---------------------------|-------------------|
 | 跑所有 AI 模型（本地） | 便携麦克风 + 扬声器 |
 | 语音识别 (Whisper) | 录音 → 发送电脑 |
-| 语音合成 (CosyVoice 纽约口音) | 接收音频 → 播放 |
+| **流式**语音合成 (CosyVoice 纽约口音) | **流式接收** → 实时播放 |
 | **发音纠正引擎** ⭐ | **实时显示纠正提示** |
-| 对话 API (云端/本地 LLM) | 简约对话 UI |
+| LLM 云端 API (GPT-4o/Claude) | 简约对话 UI |
 
 > **为什么这样设计？** 模型跑在电脑 GPU 上，手机只做交互——兼顾便携性和算力，所有数据在局域网传输，隐私安全。
 
@@ -36,8 +36,8 @@
 | 📱 手机应用 | Flutter (简约 Material You) |
 | ⚙️ AI 引擎 | Python + FastAPI |
 | 🎙️ STT | Whisper (本地) |
-| 🗣️ TTS + 声纹克隆 | CosyVoice (本地) |
-| 🧠 LLM | 云端 API (GPT-4o/Claude) → 降级 → 本地 Qwen GGUF |
+| 🗣️ TTS + 声纹克隆 | CosyVoice **流式合成** (本地) |
+| 🧠 LLM | 云端 API (GPT-4o/Claude) |
 | 🔗 连接 | WebSocket + mDNS 自动发现 (WiFi) |
 | ⭐ 发音纠正 | 音素对齐 + 声学特征对比 (本地) |
 
@@ -48,10 +48,13 @@
 git clone https://github.com/Tylenoler/voxlingua.git
 cd voxlingua
 
-# 2. 下载 AI 模型
+# 2. 下载 AI 语音模型
 bash scripts/download_models.sh
 
-# 3. 启动 AI 引擎
+# 3. 配置 API Key
+echo "OPENAI_API_KEY=sk-your-key-here" > engine/.env
+
+# 4. 启动 AI 引擎
 cd engine
 pip install -r requirements.txt
 python server.py            # 启动 :9876
@@ -82,7 +85,7 @@ voxlingua/
 ## 🔒 隐私
 
 - **纯本地语音处理**: STT/TTS/评分全部在你电脑上跑
-- **LLM 可选云端**: 不配置 API Key 时自动使用本地模型
+- **LLM 走云端**: 需要配置 API Key（OpenAI / Anthropic 等）
 - **音频不保存**: 默认不持久化录音数据
 
 ## 📜 许可

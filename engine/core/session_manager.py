@@ -53,8 +53,8 @@ class Session:
             last_active=self.last_active,
         )
 
-    @property
     def is_expired(self, timeout_minutes: int = 60) -> bool:
+        """Check if session has expired due to inactivity."""
         elapsed = (datetime.now() - self.last_active).total_seconds()
         return elapsed > timeout_minutes * 60
 
@@ -74,8 +74,10 @@ class SessionManager:
         language: str = "en",
         scene: str = "daily_chat",
         voice_profile: str = "new_york",
+        session_id: str = "",
     ) -> Session:
         session = Session(
+            session_id=session_id,
             language=language,
             scene=scene,
             voice_profile=voice_profile,

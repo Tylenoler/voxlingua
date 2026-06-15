@@ -1,7 +1,6 @@
 # Audio processing utilities for VoxLingua
 
 import base64
-import struct
 from io import BytesIO
 import numpy as np
 import soundfile as sf

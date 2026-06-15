@@ -1,9 +1,8 @@
 # Conversation pipeline — orchestrates STT → LLM → TTS → Correction
 
-from typing import Optional
 import numpy as np
 
-from core.session_manager import session_manager, Session
+from core.session_manager import session_manager
 from core.correction_engine import CorrectionEngine
 from core.audio_processor import decode_base64_audio, encode_pcm_f32le, chunk_audio
 from llm.cloud import get_llm_client

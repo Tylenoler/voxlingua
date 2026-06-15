@@ -1,9 +1,8 @@
 # API: Pronunciation correction endpoint
 
 from fastapi import APIRouter, HTTPException
-import numpy as np
 
-from models.schemas import AudioInput, CorrectionResult, CorrectionMode
+from models.schemas import AudioInput, CorrectionMode
 from core.audio_processor import decode_base64_audio
 from core.correction_engine import CorrectionEngine
 

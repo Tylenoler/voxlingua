@@ -1,7 +1,6 @@
 # Session management for VoxLingua
 
 import uuid
-import time
 from datetime import datetime
 from typing import Optional
 

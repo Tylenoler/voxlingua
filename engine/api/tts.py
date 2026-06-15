@@ -3,7 +3,6 @@
 from fastapi import APIRouter, HTTPException
 import numpy as np
 
-from models.schemas import AudioInput
 from core.audio_processor import encode_pcm_f32le
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])

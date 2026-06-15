@@ -1,10 +1,8 @@
 # Cloud LLM client for VoxLingua
 
 import os
-import json
 from typing import Optional
 
-import httpx
 from openai import OpenAI
 
 

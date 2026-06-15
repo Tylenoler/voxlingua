@@ -1,7 +1,6 @@
 # API: STT endpoint
 
 from fastapi import APIRouter, HTTPException
-import numpy as np
 
 from models.schemas import AudioInput
 from core.audio_processor import decode_base64_audio

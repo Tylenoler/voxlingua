@@ -1,9 +1,8 @@
 # API: Scoring endpoint
 
 from fastapi import APIRouter, HTTPException
-import numpy as np
 
-from models.schemas import AudioInput, ScoringResult, ScoreDimensions
+from models.schemas import AudioInput
 from core.audio_processor import decode_base64_audio
 from core.correction_engine import CorrectionEngine
 

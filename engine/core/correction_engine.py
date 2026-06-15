@@ -5,7 +5,6 @@
 #   medium (60-80)       → visual correction hint on device
 #   severe (< 60)        → interrupt + forced repetition
 
-from typing import Optional
 import numpy as np
 
 from models.schemas import (
@@ -160,7 +159,6 @@ class CorrectionEngine:
         comparisons = self.comparator.compare(user_phonemes, target_text)
 
         # Step 3: Calculate scores
-        scores = [c["score"] for c in comparisons if c["severity"] != "none"]
         phoneme_score = np.mean([c["score"] for c in comparisons]) if comparisons else 0.0
 
         # Step 4: Classify errors

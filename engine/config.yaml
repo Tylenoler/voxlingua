@@ -1,0 +1,39 @@
+# VoxLingua AI Engine Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 9876
+  websocket_port: 9876
+
+models:
+  stt:
+    model: "small"          # tiny/base/small/medium/large
+    device: "cuda"           # cuda or cpu
+    compute_type: "float16"  # float16 or int8
+
+  tts:
+    model_dir: "./models/cosyvoice"
+    device: "cuda"
+
+llm:
+  provider: "openai"         # openai or anthropic
+  model: "gpt-4o-mini"       # gpt-4o-mini / gpt-4o / claude-sonnet-4
+  api_key_env: "LLM_API_KEY" # env var name
+  endpoint: ""               # custom endpoint (optional)
+  temperature: 0.8
+  max_tokens: 512
+
+voice:
+  default_profile: "new_york"
+  profiles_dir: "./voice_profiles"
+
+session:
+  timeout_minutes: 60
+  max_history: 100
+
+correction:
+  mild_threshold: 80.0       # score >= 80 → mild
+  medium_threshold: 60.0     # 60 <= score < 80 → medium
+  # score < 60 → severe
+  default_mode: "medium"     # off / mild_only / medium / all
+  interrupt_on_severe: true

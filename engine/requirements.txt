@@ -1,0 +1,26 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0
+pydantic-settings>=2.0
+python-dotenv>=1.0
+
+# STT
+openai-whisper>=20240930
+
+# LLM
+httpx>=0.27.0
+openai>=1.30.0
+
+# TTS (CosyVoice)
+torch>=2.0
+librosa>=0.10.0
+
+# Audio processing
+soundfile>=0.12.0
+numpy>=1.24
+
+# ASR timing
+webrtcvad>=2.0.6
+
+# WebSocket
+websockets>=12.0

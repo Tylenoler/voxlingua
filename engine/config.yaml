@@ -11,6 +11,10 @@ models:
     device: "cuda"           # cuda or cpu
     compute_type: "float16"  # float16 or int8
 
+  aligner:
+    # Wav2Vec2 phoneme alignment model settings
+    device: "cuda"           # cuda or cpu
+
   tts:
     # Path to the downloaded CosyVoice model directory.
     # Can be relative (to engine/) or absolute.

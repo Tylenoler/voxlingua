@@ -26,6 +26,7 @@ from core.session_manager import session_manager
 from core.pipeline import ConversationPipeline
 from core.stt_engine import WhisperSTTEngine, set_stt_engine, get_stt_engine
 from core.tts_engine import CosyVoiceEngine, set_tts_engine, get_tts_engine
+from core.phoneme_aligner import Wav2Vec2Aligner, set_aligner, get_aligner
 from llm.cloud import CloudLLMClient, get_llm_client, set_llm_client
 
 logging.basicConfig(
@@ -92,12 +93,20 @@ async def get_status():
     except Exception:
         pass
 
+    aligner_loaded = False
+    try:
+        aligner = get_aligner()
+        aligner_loaded = aligner.is_loaded()
+    except Exception:
+        pass
+
     return {
         "status": "running",
         "version": "1.0.0",
         "llm_connected": llm_available,
         "stt_loaded": stt_loaded,
         "tts_loaded": tts_loaded,
+        "aligner_loaded": aligner_loaded,
         "active_sessions": session_manager.active_count,
         "connected_devices": len(_ws_connections),
     }
@@ -286,6 +295,9 @@ async def startup():
 
         # Initialize TTS engine (CosyVoice)
         _init_tts()
+
+        # Initialize phoneme aligner (Wav2Vec2 + CMUdict)
+        _init_aligner()
     else:
         logger.warning("config.yaml not found, using defaults")
 
@@ -304,6 +316,11 @@ async def shutdown():
     try:
         tts = get_tts_engine()
         tts.unload()
+    except Exception:
+        pass
+    try:
+        aligner = get_aligner()
+        aligner.unload()
     except Exception:
         pass
 
@@ -379,6 +396,23 @@ def _init_tts():
         logger.warning(
             "TTS engine not available. "
             "Run `python scripts/download_tts_model.py` to download the model."
+        )
+
+
+def _init_aligner():
+    """Configure and initialise the Wav2Vec2 phoneme aligner."""
+    aligner_config = _app_config.get("models", {}).get("aligner", {})
+    device = aligner_config.get("device", "cuda")
+
+    aligner = Wav2Vec2Aligner(device=device)
+    set_aligner(aligner)
+
+    if aligner.load():
+        logger.info("Phoneme aligner ready")
+    else:
+        logger.warning(
+            "Phoneme aligner not available — correction engine will skip alignment. "
+            "Run: pip install torchaudio"
         )
 
 

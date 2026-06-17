@@ -4,7 +4,6 @@ Tests for REST API endpoints — all engine dependencies mocked via conftest.
 Uses ``client`` fixture from conftest.py (FastAPI TestClient with mocks).
 """
 
-import pytest
 
 
 class TestGetStatus:

@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default VoxLingua permissions",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

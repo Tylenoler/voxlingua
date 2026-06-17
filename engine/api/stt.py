@@ -1,22 +1,18 @@
-# API: STT endpoint
+"""
+API: STT endpoint — /api/stt
+
+Transcribes audio to text using the local Whisper model.
+"""
 
 from fastapi import APIRouter, HTTPException
 
 from models.schemas import AudioInput
 from core.audio_processor import decode_base64_audio
+from core.stt_engine import get_stt_engine
 
 router = APIRouter(prefix="/api/stt", tags=["stt"])
 
-
-# TODO: Initialize Whisper model globally
-# import whisper
-# _whisper_model = None
-#
-# def get_stt_model():
-#     global _whisper_model
-#     if _whisper_model is None:
-#         _whisper_model = whisper.load_model("small")
-#     return _whisper_model
+__all__ = ["router"]
 
 
 @router.post("")
@@ -27,19 +23,21 @@ async def transcribe(req: AudioInput):
     try:
         audio = decode_base64_audio(req.data, req.sample_rate)
 
-        # TODO: Replace with real Whisper inference
-        # model = get_stt_model()
-        # result = model.transcribe(audio)
-        # text = result["text"].strip()
+        engine = get_stt_engine()
+        if not engine.is_loaded():
+            raise HTTPException(status_code=503, detail="STT engine not loaded")
 
-        text = "I think this is a good idea."  # stub
+        result = engine.transcribe(audio, language="en", word_timestamps=True)
 
         return {
             "session_id": req.session_id,
-            "text": text,
-            "language": "en",
-            "duration_sec": float(len(audio)) / req.sample_rate,
+            "text": result["text"],
+            "language": result["language"],
+            "segments": result["segments"],
+            "duration_sec": result["duration"],
         }
 
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

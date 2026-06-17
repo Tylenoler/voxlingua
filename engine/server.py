@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from api import stt, chat, tts, scorer, correction
 from core.session_manager import session_manager
 from core.pipeline import ConversationPipeline
+from core.stt_engine import WhisperSTTEngine, set_stt_engine, get_stt_engine
 from core.tts_engine import CosyVoiceEngine, set_tts_engine, get_tts_engine
 from llm.cloud import CloudLLMClient, get_llm_client, set_llm_client
 
@@ -77,10 +78,17 @@ async def get_status():
     except Exception:
         pass
 
-    tts_available = False
+    stt_loaded = False
     try:
-        engine = get_tts_engine()
-        tts_available = engine.is_loaded()
+        stt_engine = get_stt_engine()
+        stt_loaded = stt_engine.is_loaded()
+    except Exception:
+        pass
+
+    tts_loaded = False
+    try:
+        tts_engine = get_tts_engine()
+        tts_loaded = tts_engine.is_loaded()
     except Exception:
         pass
 
@@ -88,7 +96,8 @@ async def get_status():
         "status": "running",
         "version": "1.0.0",
         "llm_connected": llm_available,
-        "tts_loaded": tts_available,
+        "stt_loaded": stt_loaded,
+        "tts_loaded": tts_loaded,
         "active_sessions": session_manager.active_count,
         "connected_devices": len(_ws_connections),
     }
@@ -272,7 +281,10 @@ async def startup():
         # Initialize LLM client
         _init_llm()
 
-        # Initialize TTS engine
+        # Initialize STT engine (Whisper)
+        _init_stt()
+
+        # Initialize TTS engine (CosyVoice)
         _init_tts()
     else:
         logger.warning("config.yaml not found, using defaults")
@@ -285,8 +297,13 @@ async def shutdown():
     """Cleanup on shutdown."""
     logger.info("Shutting down VoxLingua engine...")
     try:
-        engine = get_tts_engine()
-        engine.unload()
+        stt = get_stt_engine()
+        stt.unload()
+    except Exception:
+        pass
+    try:
+        tts = get_tts_engine()
+        tts.unload()
     except Exception:
         pass
 
@@ -314,6 +331,23 @@ def _init_llm():
             logger.warning(f"LLM init failed (will retry on demand): {e}")
     else:
         logger.warning("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY env var.")
+
+
+def _init_stt():
+    """Configure and initialise the Whisper STT engine."""
+    stt_config = _app_config.get("models", {}).get("stt", {})
+    model_size = stt_config.get("model", "small")
+    device = stt_config.get("device", "cuda")
+    compute_type = stt_config.get("compute_type", "float16")
+
+    engine = WhisperSTTEngine(
+        model_size=model_size,
+        device=device,
+        compute_type=compute_type,
+    )
+
+    set_stt_engine(engine)
+    engine.load()  # may log a warning if it fails
 
 
 def _init_tts():

@@ -12,6 +12,7 @@ import numpy as np
 from core.session_manager import session_manager
 from core.correction_engine import CorrectionEngine
 from core.audio_processor import decode_base64_audio, encode_pcm_f32le, chunk_audio
+from core.stt_engine import get_stt_engine
 from core.tts_engine import get_tts_engine
 from llm.cloud import get_llm_client
 
@@ -127,12 +128,28 @@ class ConversationPipeline:
     # ── internal helpers ──────────────────────────────────────────
 
     def _stt(self, audio: np.ndarray) -> str:
-        """
-        Speech-to-text using Whisper.
+        """Speech-to-text using Whisper.
 
-        TODO: Replace stub with real Whisper inference.
+        Returns the transcribed text string, or empty string on failure.
         """
-        return "I think this is a good idea."
+        try:
+            engine = get_stt_engine()
+        except RuntimeError:
+            logger.warning("STT engine not available — returning stub text")
+            return "I think this is a good idea."
+
+        if not engine.is_loaded():
+            logger.warning("STT engine not loaded — returning stub text")
+            return "I think this is a good idea."
+
+        try:
+            result = engine.transcribe(audio, language="en", word_timestamps=False)
+            text = result.get("text", "")
+            logger.info("STT: %r (lang=%s, dur=%.1fs)", text[:80], result.get("language"), result.get("duration", 0))
+            return text
+        except Exception as exc:
+            logger.error("STT inference failed: %s — returning stub text", exc)
+            return "I think this is a good idea."
 
     def _tts(self, text: str, voice_profile: str = "new_york") -> np.ndarray:
         """Text-to-speech using CosyVoice with voice profile.

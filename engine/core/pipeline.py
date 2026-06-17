@@ -1,20 +1,27 @@
-# Conversation pipeline — orchestrates STT → LLM → TTS → Correction
+"""
+Conversation pipeline — orchestrates STT → LLM → TTS → Correction.
+
+audio_in → STT → LLM → TTS (streaming) → audio_out
+                          └→ CorrectionEngine → correction
+"""
+
+import logging
 
 import numpy as np
 
 from core.session_manager import session_manager
 from core.correction_engine import CorrectionEngine
 from core.audio_processor import decode_base64_audio, encode_pcm_f32le, chunk_audio
+from core.tts_engine import get_tts_engine
 from llm.cloud import get_llm_client
+
+logger = logging.getLogger("voxlingua.pipeline")
 
 
 class ConversationPipeline:
-    """
-    Orchestrates the full conversation loop:
+    """Orchestrates the full conversation loop."""
 
-    audio_in → STT → LLM → TTS (streaming) → audio_out
-                                          └→ CorrectionEngine → correction
-    """
+    TTS_SAMPLE_RATE = 24000
 
     def __init__(self):
         self.correction = CorrectionEngine()
@@ -29,12 +36,13 @@ class ConversationPipeline:
         """
         Process incoming user audio and generate reply + correction.
 
-        Returns:
-            {
-                "reply_audio": [chunked audio stream messages],
-                "reply_text": "...",
-                "correction": CorrectionResult or None,
-            }
+        Returns
+        -------
+        dict with keys:
+            - reply_audio  : list of streaming audio messages
+            - reply_text   : str
+            - correction   : CorrectionResult dict or None
+            - session_id   : str
         """
         session = session_manager.get_session(session_id)
         if not session:
@@ -43,7 +51,7 @@ class ConversationPipeline:
         # 1. Decode audio
         audio = decode_base64_audio(audio_b64, sample_rate)
 
-        # 2. STT (stub - real Whisper will be integrated separately)
+        # 2. STT — real Whisper will be integrated separately
         user_text = self._stt(audio)
 
         # 3. Add to conversation history
@@ -56,7 +64,7 @@ class ConversationPipeline:
         # 5. Add reply to history
         session.add_message("assistant", reply_text)
 
-        # 6. TTS (stub - real CosyVoice will be integrated separately)
+        # 6. TTS — real CosyVoice inference
         reply_audio = self._tts(reply_text, session.voice_profile)
 
         # 7. Correction engine
@@ -67,13 +75,13 @@ class ConversationPipeline:
             mode=session.correction_mode,
         )
 
-        # 8. Chunk audio for streaming
-        chunks = chunk_audio(reply_audio, chunk_size_ms=200, sample_rate=24000)
+        # 8. Chunk audio for streaming (200 ms frames)
+        chunks = chunk_audio(reply_audio, chunk_size_ms=200, sample_rate=self.TTS_SAMPLE_RATE)
 
         stream_messages = []
         total = len(chunks)
         for i, chunk in enumerate(chunks):
-            encoded = encode_pcm_f32le(chunk, 24000)
+            encoded = encode_pcm_f32le(chunk, self.TTS_SAMPLE_RATE)
             if i == 0:
                 msg = {
                     "type": "audio_stream_start",
@@ -81,7 +89,7 @@ class ConversationPipeline:
                         "session_id": session_id,
                         "total_chunks": total,
                         "format": "pcm_f32le",
-                        "sample_rate": 24000,
+                        "sample_rate": self.TTS_SAMPLE_RATE,
                         "text": reply_text,
                         "chunk_index": i,
                         "data": encoded,
@@ -116,6 +124,8 @@ class ConversationPipeline:
             "correction": correction.model_dump() if correction else None,
         }
 
+    # ── internal helpers ──────────────────────────────────────────
+
     def _stt(self, audio: np.ndarray) -> str:
         """
         Speech-to-text using Whisper.
@@ -125,13 +135,28 @@ class ConversationPipeline:
         return "I think this is a good idea."
 
     def _tts(self, text: str, voice_profile: str = "new_york") -> np.ndarray:
-        """
-        Text-to-speech using CosyVoice with voice profile.
+        """Text-to-speech using CosyVoice with voice profile.
 
-        TODO: Replace stub with real CosyVoice streaming inference.
+        Returns PCM f32le np.ndarray at 24 kHz.
         """
-        # Stub: generate silent audio of estimated duration
-        estimated_duration = len(text.split()) * 0.3  # ~300ms per word
-        sample_rate = 24000
-        num_samples = int(estimated_duration * sample_rate)
+        try:
+            engine = get_tts_engine()
+        except RuntimeError:
+            logger.warning("TTS engine not available — returning silent audio")
+            return self._silent_audio(text)
+
+        if not engine.is_loaded():
+            logger.warning("TTS engine not loaded — returning silent audio")
+            return self._silent_audio(text)
+
+        try:
+            return engine.generate(text, voice_profile=voice_profile)
+        except Exception as exc:
+            logger.error("TTS generation failed: %s — returning silent audio", exc)
+            return self._silent_audio(text)
+
+    def _silent_audio(self, text: str) -> np.ndarray:
+        """Generate silent audio of the estimated duration as fallback."""
+        estimated_duration = max(len(text.split()) * 0.3, 1.0)
+        num_samples = int(estimated_duration * self.TTS_SAMPLE_RATE)
         return np.zeros(num_samples, dtype=np.float32)

@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from api import stt, chat, tts, scorer, correction
 from core.session_manager import session_manager
 from core.pipeline import ConversationPipeline
-from llm.cloud import CloudLLMClient, set_llm_client
+from core.tts_engine import CosyVoiceEngine, set_tts_engine, get_tts_engine
+from llm.cloud import CloudLLMClient, get_llm_client, set_llm_client
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,16 +61,26 @@ pipeline = ConversationPipeline()
 # Active WebSocket connections
 _ws_connections: dict[str, WebSocket] = {}
 
+# App-level config (loaded at startup)
+_app_config: dict = {}
+
 
 # ── REST Endpoints ──
+
 
 @app.get("/api/status")
 async def get_status():
     """Get engine status."""
     llm_available = False
     try:
-        from llm.cloud import get_llm_client
         llm_available = get_llm_client().is_available()
+    except Exception:
+        pass
+
+    tts_available = False
+    try:
+        engine = get_tts_engine()
+        tts_available = engine.is_loaded()
     except Exception:
         pass
 
@@ -77,6 +88,7 @@ async def get_status():
         "status": "running",
         "version": "1.0.0",
         "llm_connected": llm_available,
+        "tts_loaded": tts_available,
         "active_sessions": session_manager.active_count,
         "connected_devices": len(_ws_connections),
     }
@@ -84,10 +96,21 @@ async def get_status():
 
 @app.get("/api/voices")
 async def list_voices():
-    """List available voice profiles."""
-    # TODO: Read from voice_profiles directory
-    return {
-        "voices": [
+    """List available voice profiles from the TTS engine."""
+    try:
+        engine = get_tts_engine()
+        voices = engine.list_voices()
+        if not voices:
+            voices = [
+                {
+                    "profile_id": "new_york",
+                    "name": "New York Accent (default)",
+                    "language": "en",
+                    "is_default": True,
+                }
+            ]
+    except Exception:
+        voices = [
             {
                 "profile_id": "new_york",
                 "name": "New York Accent (default)",
@@ -95,7 +118,8 @@ async def list_voices():
                 "is_default": True,
             }
         ]
-    }
+
+    return {"voices": voices}
 
 
 @app.get("/api/scenes")
@@ -112,6 +136,7 @@ async def list_scenes():
 
 
 # ── WebSocket ──
+
 
 @app.websocket("/ws/mobile")
 async def mobile_websocket(ws: WebSocket):
@@ -229,6 +254,7 @@ async def mobile_websocket(ws: WebSocket):
 
 # ── Startup / Shutdown ──
 
+
 @app.on_event("startup")
 async def startup():
     """Initialize engine on startup."""
@@ -240,31 +266,16 @@ async def startup():
     config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
     if os.path.exists(config_path):
         with open(config_path) as f:
-            config = yaml.safe_load(f)
+            _app_config.update(yaml.safe_load(f) or {})
         logger.info(f"Config loaded from {config_path}")
 
         # Initialize LLM client
-        llm_config = config.get("llm", {})
-        api_key = os.getenv(llm_config.get("api_key_env", "LLM_API_KEY"))
-        if not api_key:
-            api_key = os.getenv("OPENAI_API_KEY")
+        _init_llm()
 
-        if api_key:
-            try:
-                client = CloudLLMClient(
-                    provider=llm_config.get("provider", "openai"),
-                    model=llm_config.get("model", "gpt-4o-mini"),
-                    api_key=api_key,
-                    endpoint=llm_config.get("endpoint", ""),
-                    temperature=llm_config.get("temperature", 0.8),
-                    max_tokens=llm_config.get("max_tokens", 512),
-                )
-                set_llm_client(client)
-                logger.info(f"LLM client initialized: {client.model}")
-            except Exception as e:
-                logger.warning(f"LLM init failed (will retry on demand): {e}")
-        else:
-            logger.warning("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY env var.")
+        # Initialize TTS engine
+        _init_tts()
+    else:
+        logger.warning("config.yaml not found, using defaults")
 
     logger.info("Engine ready. Listening on port 9876...")
 
@@ -273,6 +284,68 @@ async def startup():
 async def shutdown():
     """Cleanup on shutdown."""
     logger.info("Shutting down VoxLingua engine...")
+    try:
+        engine = get_tts_engine()
+        engine.unload()
+    except Exception:
+        pass
+
+
+def _init_llm():
+    """Configure and initialise the LLM client from app config."""
+    llm_config = _app_config.get("llm", {})
+    api_key = os.getenv(llm_config.get("api_key_env", "LLM_API_KEY"))
+    if not api_key:
+        api_key = os.getenv("OPENAI_API_KEY")
+
+    if api_key:
+        try:
+            client = CloudLLMClient(
+                provider=llm_config.get("provider", "openai"),
+                model=llm_config.get("model", "gpt-4o-mini"),
+                api_key=api_key,
+                endpoint=llm_config.get("endpoint", ""),
+                temperature=llm_config.get("temperature", 0.8),
+                max_tokens=llm_config.get("max_tokens", 512),
+            )
+            set_llm_client(client)
+            logger.info(f"LLM client initialized: {client.model}")
+        except Exception as e:
+            logger.warning(f"LLM init failed (will retry on demand): {e}")
+    else:
+        logger.warning("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY env var.")
+
+
+def _init_tts():
+    """Configure and initialise the CosyVoice TTS engine."""
+    tts_config = _app_config.get("models", {}).get("tts", {})
+    model_dir = tts_config.get("model_dir", "./models/cosyvoice")
+    device = tts_config.get("device", "cuda")
+
+    # Resolve paths relative to the engine directory
+    engine_dir = os.path.dirname(os.path.abspath(__file__))
+    model_dir_abs = os.path.join(engine_dir, model_dir) if not os.path.isabs(model_dir) else model_dir
+    profiles_dir = os.path.join(engine_dir, "..", "voice_profiles")
+
+    engine = CosyVoiceEngine(
+        model_dir=model_dir_abs,
+        device=device,
+        fp16=True,
+        profiles_dir=profiles_dir,
+    )
+
+    set_tts_engine(engine)
+
+    if engine.load():
+        logger.info(
+            "TTS engine ready — %d voice profile(s) available",
+            len(engine.list_voices()),
+        )
+    else:
+        logger.warning(
+            "TTS engine not available. "
+            "Run `python scripts/download_tts_model.py` to download the model."
+        )
 
 
 # ── Main ──

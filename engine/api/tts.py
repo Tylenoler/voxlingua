@@ -1,49 +1,101 @@
-# API: TTS endpoint
+"""
+API: TTS endpoints — /api/tts
 
-from fastapi import APIRouter, HTTPException
-import numpy as np
+Synthesises text to speech using the CosyVoice TTS engine.
+Supports both full-audio and streaming responses.
+"""
+
+import json
+
+from fastapi import APIRouter, HTTPException, Body
+from fastapi.responses import StreamingResponse
 
 from core.audio_processor import encode_pcm_f32le
+from core.tts_engine import get_tts_engine
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
 
-
-# TODO: Initialize CosyVoice model globally
-# from cosyvoice.cli.cosyvoice import CosyVoice
-# _cosyvoice = None
-#
-# def get_tts_model():
-#     global _cosyvoice
-#     if _cosyvoice is None:
-#         _cosyvoice = CosyVoice(cosyvoice_path)
-#     return _cosyvoice
+__all__ = ["router"]
 
 
 @router.post("")
-async def synthesize(text: str, voice_profile: str = "new_york"):
-    """
-    Synthesize text to speech using CosyVoice with voice profile.
+async def synthesize(
+    text: str = Body(..., min_length=1, max_length=4096),
+    voice_profile: str = Body("new_york"),
+):
+    """Synthesise *text* to speech using the selected *voice_profile*.
+
+    Returns PCM f32le audio at 24 kHz encoded as base64.
     """
     try:
-        # TODO: Replace with real CosyVoice inference
-        # model = get_tts_model()
-        # audio = model.inference(text, voice_profile)
-        # text
-        # Stub: return silent audio
-        sample_rate = 24000
-        duration = max(len(text.split()) * 0.3, 1.0)
-        num_samples = int(duration * sample_rate)
-        audio = np.zeros(num_samples, dtype=np.float32)
+        engine = get_tts_engine()
+        audio = engine.generate(text, voice_profile=voice_profile)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
-        encoded = encode_pcm_f32le(audio, sample_rate)
+    if len(audio) == 0:
+        raise HTTPException(status_code=500, detail="TTS generated empty audio")
 
-        return {
+    encoded = encode_pcm_f32le(audio, engine.SAMPLE_RATE)
+
+    return {
+        "format": "pcm_f32le",
+        "sample_rate": engine.SAMPLE_RATE,
+        "data": encoded,
+        "text": text,
+        "language": "en",
+    }
+
+
+@router.post("/stream")
+async def synthesize_stream(
+    text: str = Body(..., min_length=1, max_length=4096),
+    voice_profile: str = Body("new_york"),
+):
+    """Stream TTS audio as a sequence of PCM f32le chunks (server-sent events)."""
+    try:
+        engine = get_tts_engine()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    async def event_stream():
+        meta = json.dumps({
+            "type": "tts_meta",
             "format": "pcm_f32le",
-            "sample_rate": sample_rate,
-            "data": encoded,
+            "sample_rate": engine.SAMPLE_RATE,
             "text": text,
-            "language": "en",
-        }
+        })
+        yield f"data: {meta}\n\n"
+        for chunk in engine.generate_stream(text, voice_profile=voice_profile):
+            encoded = encode_pcm_f32le(chunk, engine.SAMPLE_RATE)
+            yield f"data: {json.dumps({'type': 'audio', 'data': encoded})}\n\n"
+        yield "data: [DONE]\n\n"
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/voices")
+async def list_tts_voices():
+    """List all available voice profiles the TTS engine can use."""
+    try:
+        engine = get_tts_engine()
+        voices = engine.list_voices()
+    except RuntimeError:
+        voices = [
+            {
+                "profile_id": "new_york",
+                "name": "New York Accent (default)",
+                "language": "en",
+                "method": "zero_shot",
+                "is_default": True,
+            }
+        ]
+
+    return {"voices": voices}

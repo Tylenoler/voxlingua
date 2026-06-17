@@ -12,8 +12,17 @@ models:
     compute_type: "float16"  # float16 or int8
 
   tts:
+    # Path to the downloaded CosyVoice model directory.
+    # Can be relative (to engine/) or absolute.
     model_dir: "./models/cosyvoice"
+
+    # Inference device: "cuda" or "cpu".
+    # Falls back to CPU automatically if CUDA is unavailable.
     device: "cuda"
+
+    # Voice profiles directory (reference audio for zero-shot cloning).
+    # Defaults to <project_root>/voice_profiles/
+    profiles_dir: "../voice_profiles"
 
 llm:
   provider: "openai"         # openai or anthropic

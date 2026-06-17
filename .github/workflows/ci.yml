@@ -36,6 +36,20 @@ jobs:
       - run: npm ci || true
       - run: npx tsc --noEmit || true
 
+  test-engine:
+    name: Test Python Engine
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt pytest pytest-asyncio httpx
+      - run: python -m pytest tests/ -v --tb=short
+
   lint-mobile:
     name: Analyze Mobile (Flutter)
     runs-on: ubuntu-latest

@@ -28,6 +28,14 @@ from pathlib import Path
 from typing import Generator, Optional
 
 import numpy as np
+import os
+
+# Add vendor path for matcha-tts stubs (used when real matcha-tts is not installed)
+_vendor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vendor')
+if os.path.isdir(_vendor_path):
+    import sys
+    if _vendor_path not in sys.path:
+        sys.path.insert(0, _vendor_path)
 
 logger = logging.getLogger("voxlingua.tts.cosyvoice")
 

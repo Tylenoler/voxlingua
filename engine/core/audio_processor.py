@@ -7,17 +7,26 @@ import soundfile as sf
 
 
 def decode_base64_audio(data_b64: str, sample_rate: int = 16000, dtype: type = np.float64) -> np.ndarray:
-    """Decode base64-encoded audio to numpy array."""
+    """Decode base64-encoded audio to numpy array.
+
+    Supports both WAV (with RIFF header) and raw PCM (f32le) formats.
+    """
     raw = base64.b64decode(data_b64)
     buf = BytesIO(raw)
-    audio, sr = sf.read(buf)
-    # Resample if needed
-    if sr != sample_rate:
-        from librosa import resample
-        audio = resample(audio, orig_sr=sr, target_sr=sample_rate)
+    
+    if raw[:4] == b"RIFF":
+        try:
+            audio, sr = sf.read(buf)
+            if sr != sample_rate:
+                from librosa import resample
+                audio = resample(audio, orig_sr=sr, target_sr=sample_rate)
+            return audio.astype(dtype)
+        except Exception:
+            pass
+    
+    # Fallback: treat as raw PCM f32le
+    audio = np.frombuffer(raw, dtype=np.float32)
     return audio.astype(dtype)
-
-
 def encode_pcm_f32le(audio: np.ndarray, sample_rate: int = 24000) -> str:
     """Encode numpy audio array to base64 PCM f32le."""
     pcm = audio.astype(np.float32).tobytes()

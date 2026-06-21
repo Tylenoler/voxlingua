@@ -1,5 +1,5 @@
-"""
-CosyVoice 3 TTS — Text-to-speech with voice cloning and streaming
+﻿"""
+CosyVoice 3 TTS - Text-to-speech with voice cloning and streaming
 
 Integrates CosyVoice 3 from FunAudioLLM:
   - Natural TTS with voice cloning (zero-shot)
@@ -9,15 +9,12 @@ Integrates CosyVoice 3 from FunAudioLLM:
 
 Requirements:
   - CosyVoice repo cloned to %TEMP%\cosyvoice (or set COSYVOICE_PATH)
-  - matcha-tts installed (requires C++ build tools: https://aka.ms/vs/17/release/vs_BuildTools.exe)
+  - Vendor stubs for matcha-tts in engine/vendor/
   - Model weights downloaded via scripts/download_models.py
 
 Fallback:
   When CosyVoice is not available, falls back to Edge TTS
   (Microsoft neural voices via edge-tts library).
-
-Model sources:
-  - ModelScope: https://www.modelscope.cn/models/iic/CosyVoice-300M
 """
 
 import logging
@@ -28,14 +25,11 @@ from pathlib import Path
 from typing import Generator, Optional
 
 import numpy as np
-import os
 
-# Add vendor path for matcha-tts stubs (used when real matcha-tts is not installed)
+# Add vendor path for matcha-tts stubs
 _vendor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vendor')
-if os.path.isdir(_vendor_path):
-    import sys
-    if _vendor_path not in sys.path:
-        sys.path.insert(0, _vendor_path)
+if os.path.isdir(_vendor_path) and _vendor_path not in sys.path:
+    sys.path.insert(0, _vendor_path)
 
 logger = logging.getLogger("voxlingua.tts.cosyvoice")
 
@@ -69,6 +63,7 @@ class CosyVoiceTTS:
         self._model = None
         self._lock = threading.Lock()
         self._edge_tts = None
+        self._sample_rate = 22050
 
     def _get_edge_tts(self):
         if self._edge_tts is None:
@@ -86,12 +81,11 @@ class CosyVoiceTTS:
         if self.model_dir and os.path.isdir(self.model_dir):
             return self.model_dir
 
-        # Check standard download locations
         candidates = [
+            str(Path(__file__).parent.parent / "models" / "weights" / "cosyvoice" / "300m"),
             str(Path(__file__).parent.parent / "models" / "weights" / "cosyvoice" / "iic" / "CosyVoice-300M"),
             str(Path(__file__).parent.parent / "models" / "weights" / "cosyvoice" / "CosyVoice-300M"),
         ]
-        # Check ModelScope cache
         ms_cache = os.path.join(Path.home(), ".cache", "modelscope", "hub", "iic", "CosyVoice-300M")
         candidates.append(ms_cache)
 
@@ -105,22 +99,25 @@ class CosyVoiceTTS:
         if self._model is not None:
             return
 
-        model_path = self._resolve_model_path()
-        if not model_path:
-            logger.info("CosyVoice model not found. Using Edge TTS fallback.")
-            return
+        with self._lock:
+            if self._model is not None:
+                return
 
-        logger.info(f"Loading CosyVoice model from {model_path}...")
+            model_path = self._resolve_model_path()
+            if not model_path:
+                logger.info("CosyVoice model not found. Using Edge TTS fallback.")
+                return
 
-        try:
-            from cosyvoice.cli.cosyvoice import CosyVoice
-            self._model = CosyVoice(model_path)
-            logger.info("CosyVoice model loaded successfully")
-        except ImportError as e:
-            logger.warning(f"CosyVoice package import failed: {e}. Using Edge TTS fallback.")
-            logger.warning("To use CosyVoice: run scripts/setup_cosyvoice.bat")
-        except Exception as e:
-            logger.error(f"Failed to load CosyVoice model: {e}")
+            logger.info(f"Loading CosyVoice model from {model_path}...")
+            try:
+                from cosyvoice.cli.cosyvoice import CosyVoice
+                self._model = CosyVoice(model_path)
+                logger.info("CosyVoice model loaded successfully")
+            except ImportError as e:
+                logger.warning(f"CosyVoice package import failed: {e}. Using Edge TTS fallback.")
+                logger.warning("To use CosyVoice: run scripts/setup_cosyvoice.bat")
+            except Exception as e:
+                logger.error(f"Failed to load CosyVoice model: {e}")
 
     def synthesize(
         self,
@@ -145,6 +142,11 @@ class CosyVoiceTTS:
 
         return self._fallback_silence(text)
 
+    def check_available(self) -> bool:
+        '''Check if CosyVoice model is available, loading it if needed.'''
+        self._lazy_load()
+        return self._model is not None
+
     def synthesize_stream(
         self,
         text: str,
@@ -152,28 +154,39 @@ class CosyVoiceTTS:
         chunk_size_ms: int = 200,
     ) -> Generator[np.ndarray, None, None]:
         full_audio = self.synthesize(text, voice_profile)
-        sr = 24000
-        cs = int(sr * chunk_size_ms / 1000)
+        cs = int(self._sample_rate * chunk_size_ms / 1000)
         for start in range(0, len(full_audio), cs):
             yield full_audio[start:start + cs]
 
     def _synthesize_sft(self, text: str) -> np.ndarray:
+        """SFT synthesis without voice cloning."""
         result = self._model.inference_sft(text, spk_id="default")
-        return result["tts_speech"].numpy()
+        for chunk in result:
+            return chunk["tts_speech"].numpy()
+        return np.zeros((0,), dtype=np.float32)
 
     def _synthesize_with_clone(self, text: str, profile_path: str) -> np.ndarray:
-        from cosyvoice.utils.file_utils import load_wav
-        ps = load_wav(profile_path, 16000)
-        result = self._model.inference_zero_shot(text, ps, text)
-        chunks = [c["tts_speech"].numpy() for c in result]
-        return np.concatenate(chunks) if chunks else np.zeros((0,), dtype=np.float32)
+        """Zero-shot voice cloning from reference audio."""
+        prompt_text = os.path.splitext(os.path.basename(profile_path))[0]
+        # inference_zero_shot(tts_text, prompt_text, prompt_wav_path)
+        result = self._model.inference_zero_shot(text, prompt_text, profile_path)
+        chunks = []
+        for chunk in result:
+            chunks.append(chunk["tts_speech"].numpy())
+        if chunks:
+            return np.concatenate(chunks)
+        return np.zeros((0,), dtype=np.float32)
 
     def _fallback_silence(self, text: str) -> np.ndarray:
         dur = max(len(text.split()) * 0.3, 1.0)
-        return np.zeros(int(dur * 24000), dtype=np.float32)
+        return np.zeros(int(dur * self._sample_rate), dtype=np.float32)
 
     def is_available(self) -> bool:
         return self._model is not None
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
 
     def list_profiles(self) -> list[dict]:
         profiles = []
@@ -181,8 +194,10 @@ class CosyVoiceTTS:
         if pd.exists():
             for w in sorted(pd.glob("*.wav")):
                 profiles.append({
-                    "profile_id": w.stem, "name": w.stem.replace("_", " ").title(),
-                    "language": "en", "is_default": w.stem == "new_york",
+                    "profile_id": w.stem,
+                    "name": w.stem.replace("_", " ").title(),
+                    "language": "en",
+                    "is_default": w.stem == "new_york",
                 })
         if self._edge_tts or not profiles:
             try:
@@ -190,10 +205,12 @@ class CosyVoiceTTS:
                 for pid, info in VOICE_INFO.items():
                     if not any(p["profile_id"] == pid for p in profiles):
                         profiles.append({
-                            "profile_id": pid, "name": info["name"],
+                            "profile_id": pid,
+                            "name": info["name"],
                             "language": info["language"],
                             "is_default": info.get("is_default", False),
                         })
             except ImportError:
                 pass
         return profiles
+

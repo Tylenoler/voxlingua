@@ -1,0 +1,13 @@
+﻿__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+.git/
+models/weights/*.pth
+models/weights/*.pt
+models/weights/*.bin
+models/weights/*.onnx

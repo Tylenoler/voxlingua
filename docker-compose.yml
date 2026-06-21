@@ -1,0 +1,36 @@
+﻿# ============================================================
+# VoxLingua — Docker Compose
+#
+# Starts the AI engine server.
+# Desktop and mobile apps connect via WebSocket on port 9876.
+# ============================================================
+
+services:
+  engine:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+    container_name: voxlingua-engine
+    ports:
+      - "9876:9876"
+    volumes:
+      # Mount models directory for persistence across restarts
+      - voxlingua_models:/app/models/weights
+      # Mount voice profiles (add your .wav files here)
+      - ./engine/voice_profiles:/app/voice_profiles
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - WHISPER_MODEL=${WHISPER_MODEL:-large}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    # GPU support (uncomment if nvidia-container-toolkit is installed)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  voxlingua_models:

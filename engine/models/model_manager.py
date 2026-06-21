@@ -1,4 +1,4 @@
-﻿"""
+"""
 VoxLingua — Model Manager
 
 Handles downloading, caching, and lifecycle of ML models:
@@ -147,21 +147,29 @@ def warmup_models(config: dict) -> dict[str, bool]:
         results["stt"] = False
         logger.warning(f"STT model load failed (will lazy-load): {e}")
 
-    # TTS model
+    # TTS model — try CosyVoice first, fall back to EdgeTTS
     tts_cfg = config.get("models", {}).get("tts", {})
     tts_dir = tts_cfg.get("model_dir", str(MODELS_DIR / "cosyvoice" / "300m"))
+    cosyvoice_loaded = False
     try:
         from tts.cosyvoice_tts import CosyVoiceTTS
         _model_instances["tts"] = CosyVoiceTTS(model_dir=tts_dir)
         results["tts"] = True
-        logger.info(f"TTS model (CosyVoice) loaded from {tts_dir}")
+        logger.info(f"TTS model (CosyVoice) initialized from {tts_dir}")
+        cosyvoice_loaded = True
     except Exception as e:
-        results["tts"] = False
-        logger.warning(f"TTS model load failed (will lazy-load): {e}")
+        logger.warning(f"CosyVoice TTS load failed: {e}")
+
+    if not cosyvoice_loaded:
+        try:
+            _model_instances["tts"] = EdgeTTS()
+            results["tts"] = True
+            logger.info("TTS using Edge TTS fallback (Microsoft neural voices)")
+        except Exception as e:
+            results["tts"] = False
+            logger.warning(f"Edge TTS failed too: {e}")
 
     return results
-
-
 def get_model(name: str):
     """Get a loaded model instance, raising if not loaded."""
     instance = _model_instances.get(name)

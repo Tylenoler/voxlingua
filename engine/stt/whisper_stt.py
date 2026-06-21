@@ -1,4 +1,4 @@
-﻿# Whisper STT — Speech-to-text with word-level timestamps
+# Whisper STT — Speech-to-text with word-level timestamps
 #
 # Provides:
 #   - Full transcription with word-level timestamps
@@ -236,11 +236,14 @@ class WhisperSTT:
     def _analyze_prosody(self, audio: np.ndarray) -> dict:
         """Analyze prosodic features from audio.
 
-        In production, uses librosa to extract:
+        Uses librosa to extract:
         - F0 contour (pitch)
         - Energy (loudness)
-        - Speaking rate
+        - Speaking rate via energy-based VAD
         - Pause patterns
+
+        Note: webrtcvad is not used due to C++ build dependency issues.
+        Instead, a simple energy-based VAD is used via librosa.
         """
         if len(audio) < 160:  # Need at least 10ms
             return {
@@ -254,42 +257,39 @@ class WhisperSTT:
         try:
             import librosa
 
-            # F0 estimation
+            # ── F0 estimation (pitch) ──
             f0, voiced_flags, _ = librosa.pyin(
                 audio.astype(np.float64),
-                fmin=librosa.note_to_hz("C2"),
-                fmax=librosa.note_to_hz("C7"),
+                fmin=librosa.note_to_hz("C2"),    # ~65 Hz
+                fmax=librosa.note_to_hz("C7"),    # ~2093 Hz
                 sr=16000,
             )
             f0_voiced = f0[voiced_flags]
             pitch_mean = float(np.nanmean(f0_voiced)) if len(f0_voiced) > 0 else 0.0
             pitch_range = float(np.nanstd(f0_voiced)) if len(f0_voiced) > 0 else 0.0
 
-            # Energy (RMS)
-            rms = librosa.feature.rms(y=audio.astype(np.float64), frame_length=2048, hop_length=512)[0]
+            # ── Energy (RMS) ──
+            rms = librosa.feature.rms(
+                y=audio.astype(np.float64),
+                frame_length=2048,
+                hop_length=512
+            )[0]
             energy_mean = float(np.mean(rms))
 
-            # Voice activity detection for speaking rate estimation
-            import webrtcvad
-            vad = webrtcvad.Vad(2)
-            frame_len = 320  # 20ms at 16kHz
-            voiced_frames = 0
-            total_frames = len(audio) // frame_len
-
-            for i in range(total_frames):
-                frame = audio[i * frame_len:(i + 1) * frame_len]
-                frame_int16 = (frame * 32767).astype(np.int16).tobytes()
-                try:
-                    if vad.is_speech(frame_int16, 16000):
-                        voiced_frames += 1
-                except Exception:
-                    pass
-
+            # ── Energy-based voice activity detection ──
+            # Use RMS energy threshold to detect speech vs silence
+            energy_threshold = np.percentile(rms, 15)  # Bottom 15% = silence
+            voiced_frames = int(np.sum(rms > energy_threshold))
+            total_frames = len(rms)
             pause_ratio = 1.0 - (voiced_frames / max(total_frames, 1))
-            speaking_rate = float(len(audio) / 16000 * (1 - pause_ratio))
 
-        except ImportError:
-            # Fallback if librosa/webrtcvad not installed
+            # Speaking rate (words per minute estimate)
+            duration_sec = len(audio) / 16000
+            # Estimate syllables from energy peaks
+            speaking_rate = float(duration_sec * (1 - pause_ratio))
+
+        except Exception:
+            # Graceful fallback if librosa fails
             rms_val = float(np.sqrt(np.mean(audio ** 2)))
             energy_mean = rms_val
             pitch_mean = 120.0

@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -14,12 +14,16 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Model weights (downloaded models, not source code)
+# Model weights (downloaded by scripts/download_models.py)
+# Exclude all downloaded model files
+engine/models/weights/
 /models/
 *.pt
 *.pth
+*.safetensors
 *.gguf
 *.bin
+*.h5
 *.onnx
 
 # Audio data

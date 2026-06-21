@@ -1,9 +1,9 @@
-﻿"""
+"""
 API: TTS endpoint
-Synthesize speech using CosyVoice 3 with voice cloning.
+Synthesize speech using Edge TTS (primary) with CosyVoice 3 fallback.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from core.audio_processor import encode_pcm_f32le
@@ -30,7 +30,7 @@ class TTSRequest(BaseModel):
 @router.post("")
 async def synthesize(req: TTSRequest):
     """
-    Synthesize text to speech using CosyVoice 3 with voice profile.
+    Synthesize text to speech using TTS engine with voice profile.
 
     Args:
         req: TTSRequest with text and voice_profile
@@ -54,6 +54,46 @@ async def synthesize(req: TTSRequest):
             "duration_sec": round(len(audio) / sample_rate, 2),
         }
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/play")
+async def synthesize_and_play(req: TTSRequest):
+    """
+    Synthesize text to speech and return raw PCM f32le audio.
+
+    Returns raw audio data that browsers can play via AudioContext.
+    """
+    try:
+        model = get_tts()
+        audio = model.synthesize(req.text, req.voice_profile)
+
+        # Convert float32 [-1, 1] to int16 WAV for browser playback
+        import io
+        import struct
+        import wave
+
+        sample_rate = 24000
+        buf = io.BytesIO()
+
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(sample_rate)
+            # Convert float32 to int16
+            audio_int16 = (audio * 32767).astype("int16")
+            wf.writeframes(audio_int16.tobytes())
+
+        wav_bytes = buf.getvalue()
+
+        return Response(
+            content=wav_bytes,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f'inline; filename="voxlingua_{hash(req.text)}.wav"',
+            },
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

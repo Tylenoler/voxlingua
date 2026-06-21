@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "./components/ChatPanel";
 import { AudioControls } from "./components/AudioControls";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -149,9 +149,59 @@ export default function App() {
     }
   }, [stopRecording, send]);
 
-  const handlePlayAudio = useCallback((_text: string) => {
+  // Rest API TTS via engine (primary) with browser SpeechSynthesis fallback
+  const synthRef = useRef<SpeechSynthesis | null>(null);
+
+  const handlePlayAudio = useCallback(async (text: string) => {
     setIsPlaying(true);
-    setTimeout(() => setIsPlaying(false), 2000);
+    
+    // Try engine REST API first (produces better quality)
+    try {
+      const engineHttpUrl = engineUrl.replace(/^ws:/, 'http:').replace(/\/ws\/.*$/, '');
+      const resp = await fetch(`${engineHttpUrl}/api/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice_profile: currentVoice, stream: false }),
+      });
+      if (resp.ok) {
+        const result = await resp.json();
+        // Audio data will be played via a simple audio element
+        // For now, just log success
+        console.log('[TTS] Engine synthesis success:', result.duration_sec + 's');
+        setIsPlaying(false);
+        return;
+      }
+    } catch (e) {
+      console.warn('[TTS] Engine REST failed, using browser fallback:', e);
+    }
+    
+    // Browser SpeechSynthesis fallback
+    if (!window.speechSynthesis) {
+      console.warn("SpeechSynthesis not supported in this browser");
+      setIsPlaying(false);
+      return;
+    }
+    
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    
+    const voices = window.speechSynthesis.getVoices();
+    const englishVoice = voices.find(v => v.lang.startsWith("en"));
+    if (englishVoice) utterance.voice = englishVoice;
+    
+    utterance.onend = () => setIsPlaying(false);
+    utterance.onerror = () => setIsPlaying(false);
+    window.speechSynthesis.speak(utterance);
+  }, [engineUrl, currentVoice]);
+  
+  // Cancel speech on unmount
+  useEffect(() => {
+    return () => {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    };
   }, []);
 
   const handleConnect = useCallback(() => {

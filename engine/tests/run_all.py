@@ -13,6 +13,7 @@ test_files = [
     "test_session.py",
     "test_correction.py",
     "test_e2e_speech.py",
+    "test_server_api.py",
 ]
 
 os.environ["PYTHONIOENCODING"] = "utf-8"

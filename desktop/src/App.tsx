@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "./components/ChatPanel";
 import { AudioControls } from "./components/AudioControls";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -14,15 +14,12 @@ const DEFAULT_SCENES: SceneInfo[] = [
   { id: "interview", name: "Job Interview", description: "Professional interview practice" },
 ];
 
-const DEFAULT_VOICES: VoiceProfile[] = [
-  { profile_id: "new_york", name: "New York Accent (default)", language: "en", is_default: true },
-];
-
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [currentScene, setCurrentScene] = useState("daily_chat");
   const [currentVoice, setCurrentVoice] = useState("new_york");
+  const [availableVoices, setAvailableVoices] = useState<VoiceProfile[]>([]);
   const [correctionMode, setCorrectionMode] = useState<CorrectionMode>({
     mode: "medium",
     interrupt_on_severe: true,
@@ -31,6 +28,26 @@ export default function App() {
   const [engineUrl, setEngineUrl] = useState(() => localStorage.getItem("voxlingua_engine_url") || "ws://localhost:9876/ws/mobile");
   const [isPlaying, setIsPlaying] = useState(false);
   const sessionIdRef = useRef<string>("");
+
+  // Fetch available voices from engine REST API
+  useEffect(() => {
+    const httpUrl = engineUrl.replace(/^ws:/, "http:").replace(/\/ws\/.*$/, "");
+    fetch(`${httpUrl}/api/tts/voices`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.voices && data.voices.length > 0) {
+          setAvailableVoices(data.voices);
+          const def = data.voices.find((v: VoiceProfile) => v.is_default);
+          if (def) setCurrentVoice(def.profile_id);
+        }
+      })
+      .catch(() => {
+        // Engine not running yet, use fallback
+        setAvailableVoices([
+          { profile_id: "new_york", name: "New York Accent (default)", language: "en", is_default: true },
+        ]);
+      });
+  }, []);
 
   const handleWSMessage = useCallback((msg: WSMessage) => {
     switch (msg.type) {
@@ -88,30 +105,23 @@ export default function App() {
     connect();
   }, []); // eslint-disable-line
 
-  // Save API key
-  useEffect(() => {
-    localStorage.setItem("voxlingua_api_key", llmApiKey);
-  }, [llmApiKey]);
+  // Save settings
+  useEffect(() => { localStorage.setItem("voxlingua_api_key", llmApiKey); }, [llmApiKey]);
+  useEffect(() => { localStorage.setItem("voxlingua_engine_url", engineUrl); }, [engineUrl]);
 
-  useEffect(() => {
-    localStorage.setItem("voxlingua_engine_url", engineUrl);
-  }, [engineUrl]);
-
-  // Send scene change
+  // Send scene/voice/mode changes
   useEffect(() => {
     if (wsStatus === "connected") {
       send({ type: "set_scene", payload: { scene: currentScene, language: "en" } });
     }
   }, [currentScene, wsStatus]); // eslint-disable-line
 
-  // Send voice change
   useEffect(() => {
     if (wsStatus === "connected") {
       send({ type: "set_voice", payload: { voice_profile_id: currentVoice } });
     }
   }, [currentVoice, wsStatus]); // eslint-disable-line
 
-  // Send correction mode change
   useEffect(() => {
     if (wsStatus === "connected") {
       send({ type: "set_correction_mode", payload: correctionMode as unknown as Record<string, unknown> });
@@ -125,12 +135,14 @@ export default function App() {
   const handleRecordStop = useCallback(async (): Promise<string> => {
     try {
       const audioB64 = await stopRecording();
+      // Show a placeholder while waiting for engine response
+      const userMsgId = `user-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
         {
-          id: `user-${Date.now()}`,
+          id: userMsgId,
           role: "user",
-          text: "🎤 (audio sent to engine)",
+          text: "🎤 (processing...)",
           timestamp: Date.now(),
         },
       ]);
@@ -149,68 +161,88 @@ export default function App() {
     }
   }, [stopRecording, send]);
 
-  // Rest API TTS via engine (primary) with browser SpeechSynthesis fallback
-  const synthRef = useRef<SpeechSynthesis | null>(null);
+  // Play TTS audio via engine REST API
+  const synthRef = useRef<HTMLAudioElement | null>(null);
 
   const handlePlayAudio = useCallback(async (text: string) => {
     setIsPlaying(true);
-    
-    // Try engine REST API first (produces better quality)
     try {
-      const engineHttpUrl = engineUrl.replace(/^ws:/, 'http:').replace(/\/ws\/.*$/, '');
+      const engineHttpUrl = engineUrl.replace(/^ws:/, "http:").replace(/\/ws\/.*$/, "");
       const resp = await fetch(`${engineHttpUrl}/api/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, voice_profile: currentVoice, stream: false }),
       });
       if (resp.ok) {
         const result = await resp.json();
-        // Audio data will be played via a simple audio element
-        // For now, just log success
-        console.log('[TTS] Engine synthesis success:', result.duration_sec + 's');
-        setIsPlaying(false);
+        // Decode base64 PCM data and play
+        const binaryStr = atob(result.data);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        // Convert PCM f32le to WAV blob for playback
+        const sampleRate = result.sample_rate || 24000;
+        const numSamples = bytes.byteLength / 4;
+        const wavHeader = new ArrayBuffer(44);
+        const dv = new DataView(wavHeader);
+        const writeStr = (off: number, s: string) => {
+          for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i));
+        };
+        writeStr(0, "RIFF");
+        dv.setUint32(4, 36 + bytes.byteLength, true);
+        writeStr(8, "WAVE");
+        writeStr(12, "fmt ");
+        dv.setUint32(16, 16, true);
+        dv.setUint16(20, 1, true); // PCM
+        dv.setUint16(22, 1, true); // mono
+        dv.setUint32(24, sampleRate, true);
+        dv.setUint32(28, sampleRate * 2, true);
+        dv.setUint16(32, 2, true);
+        dv.setUint16(34, 16, true);
+        writeStr(36, "data");
+        dv.setUint32(40, bytes.byteLength, true);
+
+        const wavBlob = new Blob([wavHeader, bytes], { type: "audio/wav" });
+        const url = URL.createObjectURL(wavBlob);
+        const audio = new Audio(url);
+        audio.onended = () => { setIsPlaying(false); URL.revokeObjectURL(url); };
+        audio.onerror = () => { setIsPlaying(false); URL.revokeObjectURL(url); };
+        synthRef.current = audio;
+        audio.play();
         return;
       }
     } catch (e) {
-      console.warn('[TTS] Engine REST failed, using browser fallback:', e);
+      console.warn("[TTS] Engine REST failed, using browser fallback:", e);
     }
-    
+
     // Browser SpeechSynthesis fallback
     if (!window.speechSynthesis) {
-      console.warn("SpeechSynthesis not supported in this browser");
       setIsPlaying(false);
       return;
     }
-    
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
-    
     const voices = window.speechSynthesis.getVoices();
-    const englishVoice = voices.find(v => v.lang.startsWith("en"));
+    const englishVoice = voices.find((v) => v.lang.startsWith("en"));
     if (englishVoice) utterance.voice = englishVoice;
-    
     utterance.onend = () => setIsPlaying(false);
     utterance.onerror = () => setIsPlaying(false);
     window.speechSynthesis.speak(utterance);
   }, [engineUrl, currentVoice]);
-  
-  // Cancel speech on unmount
+
   useEffect(() => {
     return () => {
+      if (synthRef.current) { synthRef.current.pause(); synthRef.current = null; }
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     };
   }, []);
 
-  const handleConnect = useCallback(() => {
-    connect();
-  }, [connect]);
-
-  const handleDisconnect = useCallback(() => {
-    disconnect();
-  }, [disconnect]);
+  const handleConnect = useCallback(() => { connect(); }, [connect]);
+  const handleDisconnect = useCallback(() => { disconnect(); }, [disconnect]);
 
   const correctionStatusText = () => {
     if (!wsStatus) return "";
@@ -221,7 +253,6 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Top Bar */}
       <header className="topbar">
         <div className="topbar-left">
           <h1 className="logo">VoxLingua</h1>
@@ -238,7 +269,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="main-content">
         <ChatPanel
           messages={messages}
@@ -247,7 +277,6 @@ export default function App() {
         />
       </main>
 
-      {/* Bottom Controls */}
       <footer className="bottom-bar">
         <AudioControls
           status={recStatus}
@@ -275,12 +304,11 @@ export default function App() {
         )}
       </footer>
 
-      {/* Settings */}
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         scenes={DEFAULT_SCENES}
-        voices={DEFAULT_VOICES}
+        voices={availableVoices}
         currentScene={currentScene}
         currentVoice={currentVoice}
         correctionMode={correctionMode}

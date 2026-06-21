@@ -106,3 +106,12 @@ async def list_profiles():
         return {"profiles": model.list_profiles()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+@router.get("/voices")
+async def list_voices():
+    """List all available voice profiles (Edge TTS + CosyVoice)."""
+    model = get_tts()
+    voices = model.list_profiles()
+    return {
+        "voices": voices,
+        "default": "new_york",
+    }

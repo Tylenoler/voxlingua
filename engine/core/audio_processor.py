@@ -1,4 +1,4 @@
-# Audio processing utilities for VoxLingua
+﻿# Audio processing utilities for VoxLingua
 
 import base64
 from io import BytesIO
@@ -9,11 +9,12 @@ import soundfile as sf
 def decode_base64_audio(data_b64: str, sample_rate: int = 16000, dtype: type = np.float64) -> np.ndarray:
     """Decode base64-encoded audio to numpy array.
 
-    Supports both WAV (with RIFF header) and raw PCM (f32le) formats.
+    Supports WAV (RIFF header), WebM/Opus, and raw PCM (f32le).
     """
     raw = base64.b64decode(data_b64)
     buf = BytesIO(raw)
-    
+
+    # WAV with RIFF header
     if raw[:4] == b"RIFF":
         try:
             audio, sr = sf.read(buf)
@@ -23,7 +24,20 @@ def decode_base64_audio(data_b64: str, sample_rate: int = 16000, dtype: type = n
             return audio.astype(dtype)
         except Exception:
             pass
-    
+
+    # WebM/Opus or other container formats — use pydub + ffmpeg
+    try:
+        from pydub import AudioSegment
+        seg = AudioSegment.from_file(buf)
+        if seg.channels > 1:
+            seg = seg.set_channels(1)
+        if seg.frame_rate != sample_rate:
+            seg = seg.set_frame_rate(sample_rate)
+        raw_audio = np.array(seg.get_array_of_samples(), dtype=np.float32) / 32768.0
+        return raw_audio.astype(dtype)
+    except Exception:
+        pass
+
     # Fallback: treat as raw PCM f32le
     audio = np.frombuffer(raw, dtype=np.float32)
     return audio.astype(dtype)
@@ -61,3 +75,4 @@ def normalize_audio(audio: np.ndarray) -> np.ndarray:
     if max_val > 0:
         return audio / max_val
     return audio
+

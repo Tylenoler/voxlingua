@@ -1,4 +1,4 @@
-# Cloud LLM client for VoxLingua
+﻿# Cloud LLM client for VoxLingua
 
 import os
 from typing import Optional
@@ -98,3 +98,4 @@ def get_llm_client() -> CloudLLMClient:
 def set_llm_client(client: CloudLLMClient):
     global _llm_client
     _llm_client = client
+

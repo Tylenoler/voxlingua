@@ -161,6 +161,14 @@ async def mobile_websocket(ws: WebSocket):
                 for stream_msg in result["stream"]:
                     await ws.send_json(stream_msg)
 
+                # Send STT transcription back to update the UI
+                stt_text = result.get("stt_result", {}).get("text", "")
+                if stt_text:
+                    await ws.send_json({
+                        "type": "stt_result",
+                        "payload": {"text": stt_text},
+                    })
+
                 if result.get("correction"):
                     await ws.send_json({
                         "type": "correction",

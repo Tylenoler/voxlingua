@@ -71,6 +71,7 @@ export type WSMessageType =
   | "scene_updated"
   | "set_voice"
   | "voice_updated"
+  | "stt_result"
   | "set_correction_mode"
   | "correction_mode_updated"
   | "error";
@@ -82,3 +83,4 @@ export interface WSMessage {
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 export type RecorderStatus = "idle" | "recording" | "processing" | "error";
+

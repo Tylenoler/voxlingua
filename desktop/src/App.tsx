@@ -83,6 +83,22 @@ export default function App() {
         });
         break;
       }
+      case "stt_result": {
+        const transcript = msg.payload.text as string;
+        if (transcript) {
+          setMessages((prev) => {
+            const lastUserIdx = [...prev].reverse().findIndex((m) => m.role === "user");
+            if (lastUserIdx >= 0) {
+              const idx = prev.length - 1 - lastUserIdx;
+              return prev.map((m, i) =>
+                i === idx ? { ...m, text: transcript } : m
+              );
+            }
+            return prev;
+          });
+        }
+        break;
+      }
       case "error": {
         console.error("[Engine Error]", msg.payload.message);
         break;

@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   push:
@@ -19,11 +19,13 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install ruff mypy
-      - run: ruff check .
-      - run: mypy --ignore-missing-imports --explicit-package-bases .
+      - name: Check Python lint
+        run: ruff check .
+      - name: Check Python types
+        run: mypy --ignore-missing-imports --explicit-package-bases .
 
   lint-desktop:
-    name: Lint Desktop (React)
+    name: Build Desktop (React)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,8 +35,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm ci || true
-      - run: npx tsc --noEmit || true
+      - run: npm ci
+      - name: TypeScript check
+        run: npx tsc --noEmit
+      - name: Vite build
+        run: npx vite build
 
   lint-mobile:
     name: Analyze Mobile (Flutter)
@@ -47,4 +52,5 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.24"
+      - run: flutter pub get
       - run: flutter analyze || true

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 VoxLingua AI Engine — FastAPI Server
 
@@ -8,23 +8,24 @@ Provides:
   - mDNS discovery broadcast
 """
 
-import os
-import sys
 import json
 import logging
+import os
+import sys
 
-import yaml
 import uvicorn
+import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-# Add engine directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from api import stt, chat, tts, scorer, correction
-from core.session_manager import session_manager
+from api import chat, correction, scorer, stt, tts
 from core.pipeline import ConversationPipeline
+from core.session_manager import session_manager
 from llm.cloud import CloudLLMClient, set_llm_client
+from models.model_manager import warmup_models
+from models.schemas import CorrectionMode
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +39,6 @@ app = FastAPI(
     description="AI-powered spoken language practice with voice cloning & correction",
 )
 
-# CORS for local development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,21 +47,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include REST routers
 app.include_router(stt.router)
 app.include_router(chat.router)
 app.include_router(tts.router)
 app.include_router(scorer.router)
 app.include_router(correction.router)
 
-# Global pipeline
 pipeline = ConversationPipeline()
-
-# Active WebSocket connections
 _ws_connections: dict[str, WebSocket] = {}
 
-
-# ── REST Endpoints ──
 
 @app.get("/api/status")
 async def get_status():
@@ -72,7 +66,6 @@ async def get_status():
         llm_available = get_llm_client().is_available()
     except Exception:
         pass
-
     return {
         "status": "running",
         "version": "1.0.0",
@@ -85,7 +78,6 @@ async def get_status():
 @app.get("/api/voices")
 async def list_voices():
     """List available voice profiles."""
-    # TODO: Read from voice_profiles directory
     return {
         "voices": [
             {
@@ -111,8 +103,6 @@ async def list_scenes():
     }
 
 
-# ── WebSocket ──
-
 @app.websocket("/ws/mobile")
 async def mobile_websocket(ws: WebSocket):
     """WebSocket endpoint for mobile app."""
@@ -122,7 +112,6 @@ async def mobile_websocket(ws: WebSocket):
     logger.info(f"Mobile connected: {session_id}")
 
     try:
-        # Send handshake acknowledgment
         await ws.send_json({
             "type": "handshake_ack",
             "payload": {
@@ -133,10 +122,8 @@ async def mobile_websocket(ws: WebSocket):
             },
         })
 
-        # Create session
         session = session_manager.create_session(session_id=session_id)
 
-        # Message loop
         while True:
             raw = await ws.receive_text()
             try:
@@ -160,7 +147,6 @@ async def mobile_websocket(ws: WebSocket):
                 })
 
             elif msg_type == "audio_input":
-                # Process audio through pipeline
                 result = pipeline.process_audio(
                     session_id=session_id,
                     audio_b64=payload.get("data", ""),
@@ -172,11 +158,9 @@ async def mobile_websocket(ws: WebSocket):
                     await ws.send_json({"type": "error", "payload": {"message": result["error"]}})
                     continue
 
-                # Send streaming audio chunks
                 for stream_msg in result["stream"]:
                     await ws.send_json(stream_msg)
 
-                # Send correction
                 if result.get("correction"):
                     await ws.send_json({
                         "type": "correction",
@@ -202,7 +186,6 @@ async def mobile_websocket(ws: WebSocket):
                 })
 
             elif msg_type == "set_correction_mode":
-                from models.schemas import CorrectionMode
                 session.correction_mode = CorrectionMode(
                     mode=payload.get("mode", "medium"),
                     interrupt_on_severe=payload.get("interrupt_on_severe", True),
@@ -227,23 +210,23 @@ async def mobile_websocket(ws: WebSocket):
         session_manager.remove_session(session_id)
 
 
-# ── Startup / Shutdown ──
-
 @app.on_event("startup")
 async def startup():
-    """Initialize engine on startup."""
+    """Initialize the AI engine on startup.
+
+    Loads config, initializes LLM client, and starts model warmup.
+    """
     logger.info("=" * 50)
     logger.info("  VoxLingua AI Engine starting...")
     logger.info("=" * 50)
 
-    # Load config
+    config = {}
     config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
     if os.path.exists(config_path):
         with open(config_path) as f:
-            config = yaml.safe_load(f)
+            config = yaml.safe_load(f) or {}
         logger.info(f"Config loaded from {config_path}")
 
-        # Initialize LLM client
         llm_config = config.get("llm", {})
         api_key = os.getenv(llm_config.get("api_key_env", "LLM_API_KEY"))
         if not api_key:
@@ -266,16 +249,25 @@ async def startup():
         else:
             logger.warning("No LLM API key found. Set LLM_API_KEY or OPENAI_API_KEY env var.")
 
+    # Background model warmup
+    async def _warmup():
+        logger.info("Warming up models in background...")
+        results = warmup_models(config)
+        for name, ok in results.items():
+            if ok:
+                logger.info(f"  Model '{name}' loaded")
+            else:
+                logger.warning(f"  Model '{name}' not available (will load on demand)")
+
+    import asyncio
+    asyncio.create_task(_warmup())
+
     logger.info("Engine ready. Listening on port 9876...")
-
-
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown."""
     logger.info("Shutting down VoxLingua engine...")
 
-
-# ── Main ──
 
 if __name__ == "__main__":
     uvicorn.run(

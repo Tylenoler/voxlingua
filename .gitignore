@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -14,8 +14,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Models
-models/
+# Model weights (downloaded models, not source code)
+/models/
 *.pt
 *.pth
 *.gguf

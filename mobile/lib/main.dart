@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'screens/chat_screen.dart';
 
 void main() {
   runApp(const VoxLinguaApp());
@@ -14,26 +15,20 @@ class VoxLinguaApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blueGrey,
+          seedColor: const Color(0xFF6C63FF),
           brightness: Brightness.light,
         ),
         useMaterial3: true,
       ),
-      home: const ChatScreen(),
-    );
-  }
-}
-
-class ChatScreen extends StatelessWidget {
-  const ChatScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('VoxLingua')),
-      body: const Center(
-        child: Text('AI Voice Language Tutor'),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF6C63FF),
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
       ),
+      themeMode: ThemeMode.system,
+      home: const ChatScreen(),
     );
   }
 }

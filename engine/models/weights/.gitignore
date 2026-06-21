@@ -1,0 +1,9 @@
+# Model weights — not tracked in git
+/models/
+*.pt
+*.pth
+*.gguf
+*.bin
+*.onnx
+*.safetensors
+*.h5

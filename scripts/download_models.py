@@ -1,22 +1,11 @@
-﻿#!/usr/bin/env python3
-"""
-VoxLingua — Model Download Script
-
-Downloads all required ML models for offline use.
-
-Usage:
-    python scripts/download_models.py                  # Download all models
-    python scripts/download_models.py --stt tiny        # Download specific variant
-    python scripts/download_models.py --list            # List available models
-"""
+#!/usr/bin/env python3
+"""Download VoxLingua ML models."""
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
-# Add engine to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "engine"))
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -25,77 +14,76 @@ logger = logging.getLogger("download_models")
 
 def download_whisper(variant: str = "large"):
     """Download Whisper model."""
-    logger.info(f"Downloading Whisper '{variant}'...")
     import whisper
+    logger.info(f"Downloading Whisper '{variant}'...")
     model = whisper.load_model(variant)
-    logger.info(f"  ✅ Whisper {variant} loaded (size: {sum(p.numel() for p in model.parameters()):,} params)")
+    size = sum(p.numel() for p in model.parameters())
+    logger.info(f"  OK: Whisper {variant} loaded ({size:,} params)")
 
 
-def download_wav2vec2(variant: str = "large"):
-    """Download Wav2Vec2 model for phoneme alignment."""
-    from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+def download_wav2vec2(variant: str = "base"):
+    """Download Wav2Vec2 model from HuggingFace."""
+    from models.model_manager import MODELS_DIR, mark_model_downloaded
+    from huggingface_hub import snapshot_download
 
     repo = {
         "base": "facebook/wav2vec2-base-960h",
         "large": "facebook/wav2vec2-large-960h-lv60-self",
     }[variant]
 
+    model_dir = MODELS_DIR / "wav2vec2" / variant
+    model_dir.mkdir(parents=True, exist_ok=True)
+
     logger.info(f"Downloading Wav2Vec2 '{variant}' from {repo}...")
-    processor = Wav2Vec2Processor.from_pretrained(repo)
-    model = Wav2Vec2ForCTC.from_pretrained(repo)
-    logger.info(f"  ✅ Wav2Vec2 {variant} loaded")
+    logger.info(f"  Target: {model_dir}")
+    snapshot_download(repo, local_dir=str(model_dir), local_dir_use_symlinks=False)
+    mark_model_downloaded("wav2vec2", variant)
+    logger.info(f"  OK: Wav2Vec2 {variant} downloaded")
 
 
-def download_cosyvoice(variant: str = "300m"):
-    """Download CosyVoice model.
-
-    Note: CosyVoice must be downloaded from ModelScope or HuggingFace.
-    This function provides instructions.
-    """
-    logger.info("CosyVoice model download instructions:")
+def show_cosyvoice_instructions():
+    logger.info("CosyVoice download instructions:")
     logger.info("")
-    logger.info("  Option 1: ModelScope (recommended for Chinese users)")
+    logger.info("  Option 1: ModelScope")
     logger.info("    pip install modelscope")
-    logger.info("    from modelscope.hub.snapshot_download import snapshot_download")
-    logger.info('    snapshot_download("iic/CosyVoice-300M", local_dir="./models/weights/cosyvoice/300m")')
+    logger.info('    python -c "from modelscope.hub.snapshot_download import snapshot_download;')
+    logger.info('        snapshot_download(\"iic/CosyVoice-300M\",')
+    logger.info('            local_dir=\"./models/weights/cosyvoice/300m\")"')
     logger.info("")
     logger.info("  Option 2: HuggingFace")
     logger.info("    git lfs install")
     logger.info("    git clone https://huggingface.co/FunAudioLLM/CosyVoice-300M ./models/weights/cosyvoice/300m")
-    logger.info("")
-    logger.info("  Option 3: Manual download")
-    logger.info("    Visit: https://www.modelscope.cn/models/iic/CosyVoice-300M")
-    logger.info("    Download and extract to: ./models/weights/cosyvoice/300m/")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Download VoxLingua ML models")
-    parser.add_argument("--stt", nargs="?", const="large", help="Whisper variant (tiny/base/small/medium/large)")
-    parser.add_argument("--aligner", nargs="?", const="large", help="Wav2Vec2 variant (base/large)")
-    parser.add_argument("--tts", nargs="?", const="300m", help="CosyVoice variant (300m)")
+    parser.add_argument("--stt", nargs="?", const="large", help="Whisper variant")
+    parser.add_argument("--aligner", nargs="?", const="base", help="Wav2Vec2 variant (base/large)")
+    parser.add_argument("--tts", action="store_true", help="Show CosyVoice instructions")
     parser.add_argument("--list", action="store_true", help="List available models")
-    parser.add_argument("--all", action="store_true", help="Download all models")
+    parser.add_argument("--all", action="store_true", help="Download all available models")
 
     args = parser.parse_args()
-
-    model_dir = Path(__file__).parent.parent / "engine" / "models" / "weights"
-    model_dir.mkdir(parents=True, exist_ok=True)
 
     if args.list:
         print("Available models:")
         print("  --stt     tiny/base/small/medium/large (default: large)")
-        print("  --aligner base/large (default: large)")
-        print("  --tts     300m (instructions only)")
+        print("  --aligner base/large (default: base)")
+        print("  --tts     Show CosyVoice download instructions")
         return
 
-    if args.stt or args.all:
-        download_whisper(args.stt or "large")
+    if args.all:
+        download_whisper("large")
+        download_wav2vec2("base")
+        show_cosyvoice_instructions()
+        return
 
-    if args.aligner or args.all:
-        download_wav2vec2(args.aligner or "large")
-
-    if args.tts or args.all:
-        download_cosyvoice(args.tts or "300m")
+    if args.stt:
+        download_whisper(args.stt)
+    if args.aligner:
+        download_wav2vec2(args.aligner)
+    if args.tts:
+        show_cosyvoice_instructions()
 
     if not any([args.stt, args.aligner, args.tts, args.all]):
         parser.print_help()

@@ -6,7 +6,7 @@ import numpy as np
 import soundfile as sf
 
 
-def decode_base64_audio(data_b64: str, sample_rate: int = 16000) -> np.ndarray:
+def decode_base64_audio(data_b64: str, sample_rate: int = 16000, dtype: type = np.float64) -> np.ndarray:
     """Decode base64-encoded audio to numpy array."""
     raw = base64.b64decode(data_b64)
     buf = BytesIO(raw)
@@ -15,7 +15,7 @@ def decode_base64_audio(data_b64: str, sample_rate: int = 16000) -> np.ndarray:
     if sr != sample_rate:
         from librosa import resample
         audio = resample(audio, orig_sr=sr, target_sr=sample_rate)
-    return audio
+    return audio.astype(dtype)
 
 
 def encode_pcm_f32le(audio: np.ndarray, sample_rate: int = 24000) -> str:

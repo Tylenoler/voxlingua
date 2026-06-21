@@ -44,6 +44,14 @@ class WhisperSTT:
         )
         logger.info(f"Whisper {self.model_size} loaded")
 
+
+    def _ensure_dtype(self, audio: np.ndarray) -> np.ndarray:
+        """Ensure audio is float32 for whisper internal processing."""
+        if audio.dtype != np.float64:
+            audio = audio.astype(np.float32)
+        return audio
+
+
     def transcribe(
         self,
         audio: np.ndarray,
@@ -65,6 +73,7 @@ class WhisperSTT:
                 duration_sec: Audio duration in seconds
         """
         self._lazy_load()
+        audio = self._ensure_dtype(audio)
 
         result = self._model.transcribe(
             audio,
@@ -118,6 +127,7 @@ class WhisperSTT:
                 phonemes: Per-phoneme data (phoneme, start, end, confidence, word)
                 prosody: Prosody metrics (pitch range, speaking rate, energy)
         """
+        audio = self._ensure_dtype(audio)
         # Step 1: Get word-level transcription from Whisper
         result = self.transcribe(audio, language=language, word_timestamps=True)
 

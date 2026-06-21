@@ -41,20 +41,24 @@ def download_wav2vec2(variant: str = "base"):
     logger.info(f"  OK: Wav2Vec2 {variant} downloaded")
 
 
-def show_cosyvoice_instructions():
-    logger.info("CosyVoice download instructions:")
-    logger.info("")
-    logger.info("  Option 1: ModelScope")
-    logger.info("    pip install modelscope")
-    logger.info('    python -c "from modelscope.hub.snapshot_download import snapshot_download;')
-    logger.info('        snapshot_download(\"iic/CosyVoice-300M\",')
-    logger.info('            local_dir=\"./models/weights/cosyvoice/300m\")"')
-    logger.info("")
-    logger.info("  Option 2: HuggingFace")
-    logger.info("    git lfs install")
-    logger.info("    git clone https://huggingface.co/FunAudioLLM/CosyVoice-300M ./models/weights/cosyvoice/300m")
-
-
+def download_cosyvoice():
+    """Download CosyVoice-300M model from ModelScope."""
+    logger.info("Downloading CosyVoice-300M from ModelScope...")
+    logger.info("  This requires modelscope package.")
+    logger.info("  pip install modelscope")
+    try:
+        from modelscope import snapshot_download
+        from models.model_manager import MODELS_DIR
+        model_dir = MODELS_DIR / "cosyvoice" / "iic" / "CosyVoice-300M"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_download("iic/CosyVoice-300M", cache_dir=str(MODELS_DIR / "cosyvoice"))
+        from models.model_manager import mark_model_downloaded
+        mark_model_downloaded("cosyvoice", "iic/CosyVoice-300M")
+        logger.info(f"  OK: CosyVoice-300M downloaded to {model_dir}")
+    except ImportError:
+        logger.info("  modelscope not installed. Run: pip install modelscope")
+    except Exception as e:
+        logger.warning(f"  Download failed: {e}")
 def main():
     parser = argparse.ArgumentParser(description="Download VoxLingua ML models")
     parser.add_argument("--stt", nargs="?", const="large", help="Whisper variant")
@@ -69,13 +73,13 @@ def main():
         print("Available models:")
         print("  --stt     tiny/base/small/medium/large (default: large)")
         print("  --aligner base/large (default: base)")
-        print("  --tts     Show CosyVoice download instructions")
+        print("  --tts     Download CosyVoice-300M model")
         return
 
     if args.all:
         download_whisper("large")
         download_wav2vec2("base")
-        show_cosyvoice_instructions()
+        download_cosyvoice()
         return
 
     if args.stt:
@@ -83,7 +87,7 @@ def main():
     if args.aligner:
         download_wav2vec2(args.aligner)
     if args.tts:
-        show_cosyvoice_instructions()
+        download_cosyvoice()
 
     if not any([args.stt, args.aligner, args.tts, args.all]):
         parser.print_help()
